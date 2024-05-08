@@ -1,0 +1,13 @@
+package-as: LibResInfo-2.0
+wowi-archive-previous: no
+
+externals:
+  LibStub: https://repos.curseforge.com/wow/libstub/trunk
+  CallbackHandler-1.0: https://repos.curseforge.com/wow/callbackhandler/trunk/CallbackHandler-1.0
+
+ignore:
+  - LibStub/tests
+  - LibResInfo-2.0-Classic
+  - LibResInfo-2.0-Retail
+  - LibResInfo-2.0_Classic.toc
+  - LibResInfo-2.0_Mainline.toc

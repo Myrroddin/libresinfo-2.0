@@ -1,1 +1,1 @@
-# libresinfo-2.0
+# LibResInfo-2.0

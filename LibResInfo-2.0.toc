@@ -1,0 +1,43 @@
+## Interface: 100207
+## Interface-Classic: 11502
+## Interface-Cata: 40400
+## Title: Lib: ResInfo-2.0
+## Notes: Library to provide information about resurrections in your group
+## Version: @project-version@
+## X-Project-Revision: @project-revision@
+
+## Author: Paul Vandersypen
+## X-Email: psvander@gmail.com
+## X-Category: Library
+
+## X-Curse-Project-ID: 19988
+## X-WoWI-ID: 16006
+## X-Wago-ID:
+## IconTexture: Interface\Icons\inv_misc_book_05
+
+## X-Website:
+## X-Credits: Phanx, for writing LibResInfo-1.0
+## X-License: MIT License
+
+#@non-version-classic@
+## OptionalDeps: LibStub, CallbackHandler-1.0
+#@end-non-version-classic@
+#@version-classic@
+## OptionalDeps: LibStub, CallbackHandler-1.0, Ace3, LibDeflate
+#@end-version-classic@
+
+LibStub\LibStub.lua
+CallbackHandler-1.0\CallbackHandler-1.0.xml
+#@non-debug@
+# #@version-classic@
+# AceComm-3.0\AceComm-3.0.xml
+# LibDeflate\lib.xml
+# LibResInfo-2.0-Classic\lib.xml
+# #@end-version-classic@
+# #@version-cata@
+# LibResInfo-2.0-Cata\lib.xml
+# #@end-version-cata@
+#@end-non-debug@
+#@version-retail@
+LibResInfo-2.0-retail\lib.xml
+#@end-version-retail@
