@@ -42,14 +42,14 @@ jobs:
       - name: Package and release for retail
         uses: BigWigsMods/packager@v2
         with:
-          args: -m pkgmeta-retail.yml
+          args: -g retail -m pkgmeta-mainline.yml
 
       # another example where we supply additional arguments, this example is specifically to release
       # for the Classic version of the game
       - name: Package and release for Classic
         uses: BigWigsMods/packager@v2
         with:
-          args: -g classic -m pkgmeta-classic.yml
+          args: -g classic -m pkgmeta-vanilla.yml
 
       # another example where we supply additional arguments, this example is specifically to release
       # for the Cataclysm Classic version of the game

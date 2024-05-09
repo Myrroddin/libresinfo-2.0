@@ -4,16 +4,12 @@ wowi-archive-previous: no
 externals:
   LibStub: https://repos.curseforge.com/wow/libstub/trunk
   CallbackHandler-1.0: https://repos.curseforge.com/wow/callbackhandler/trunk/CallbackHandler-1.0
+  AceSerializer-3.0: https://repos.curseforge.com/wow/ace3/trunk/AceSerializer-3.0
   AceComm-3.0: https://repos.curseforge.com/wow/ace3/trunk/AceComm-3.0
-  LibDeflate:
-    url: https://github.com/SafeteeWoW/LibDeflate
-    curse-slug: libdeflate
 
 ignore:
   - LibStub/tests
-  - LibDeflate/docs
-  - LibDeflate/examples
-  - LibResInfo-2.0-Retail
+  - LibResInfo-2.0-Mainline
   - LibResInfo-2.0-Cata
   - LibResInfo-2.0_Mainline.toc
   - LibResInfo-2.0_Cata.toc

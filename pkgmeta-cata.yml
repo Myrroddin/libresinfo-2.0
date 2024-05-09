@@ -7,7 +7,7 @@ externals:
 
 ignore:
   - LibStub/tests
-  - LibResInfo-2.0-Classic
-  - LibResInfo-2.0-Retail
-  - LibResInfo-2.0_Classic.toc
+  - LibResInfo-2.0-Vanilla
+  - LibResInfo-2.0-Mainline
+  - LibResInfo-2.0_Vanilla.toc
   - LibResInfo-2.0_Mainline.toc
