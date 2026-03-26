@@ -6,8 +6,7 @@ externals:
   CallbackHandler-1.0: https://repos.curseforge.com/wow/callbackhandler/trunk/CallbackHandler-1.0
 
 ignore:
-  - LibStub/tests
-  - LibResInfo-2.0-Vanilla
-  - LibResInfo-2.0-Mainline
-  - LibResInfo-2.0_Vanilla.toc
-  - LibResInfo-2.0_Mainline.toc
+  - LibResInfo-2.0/LibStub/tests
+  - LibResInfo-2.0/LibStub/LibStub.toc
+  - LibResInfo-2.0/CallbackHandler-1.0/CallbackHandler-1.0.xml
+  - README.md

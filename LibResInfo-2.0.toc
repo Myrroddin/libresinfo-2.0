@@ -1,15 +1,34 @@
-## Interface: 100207
+## Interface: 120001, 50503, 38000, 20505, 11508
 ## Title: Lib: ResInfo-2.0
 ## Notes: Library to provide information about resurrections in your group
+## Notes-deDE: @localization(locale="deDE", key="Notes", namespace="ToC")@
+## Notes-esES: @localization(locale="esES", key="Notes", namespace="ToC")@
+## Notes-esMX: @localization(locale="esMX", key="Notes", namespace="ToC")@
+## Notes-frFR: @localization(locale="frFR", key="Notes", namespace="ToC")@
+## Notes-itIT: @localization(locale="itIT", key="Notes", namespace="ToC")@
+## Notes-koKR: @localization(locale="koKR", key="Notes", namespace="ToC")@
+## Notes-ptBR: @localization(locale="ptBR", key="Notes", namespace="ToC")@
+## Notes-ruRU: @localization(locale="ruRU", key="Notes", namespace="ToC")@
+## Notes-zhCN: @localization(locale="zhCN", key="Notes", namespace="ToC")@
+## Notes-zhTW: @localization(locale="zhTW", key="Notes", namespace="ToC")@
 ## Version: @project-version@
 ## X-Project-Revision: @project-revision@
 
 ## Author: Paul Vandersypen
-## X-Email: psvander@gmail.com
-## X-Category: Library
+## Category: Libraries
+## Category-deDE: Bibliotheken
+## Category-esES: Bibliotecas
+## Category-esMX: Bibliotecas
+## Category-frFR: Bibliothèques
+## Category-itIT: Librerie
+## Category-koKR: 라이브러리
+## Category-ptBR: Bibliotecas
+## Category-ruRU: Библиотеки
+## Category-zhCN: 函数库
+## Category-zhTW: 函式庫
 
-## X-Curse-Project-ID: 19988
-## X-WoWI-ID: 16006
+## X-Curse-Project-ID:
+## X-WoWI-ID:
 ## X-Wago-ID:
 ## IconTexture: Interface\Icons\inv_misc_book_05
 
@@ -19,6 +38,4 @@
 
 ## OptionalDeps: LibStub, CallbackHandler-1.0
 
-LibStub\LibStub.lua
-CallbackHandler-1.0\CallbackHandler-1.0.xml
-LibResInfo-2.0-retail\lib.xml
+LibResInfo-2.0\lib.xml
