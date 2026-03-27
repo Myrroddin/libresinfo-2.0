@@ -1,5 +1,6 @@
 package-as: LibResInfo-2.0
 wowi-archive-previous: no
+enable-nolib-creation: no
 
 externals:
   LibResInfo-2.0/LibStub: https://repos.curseforge.com/wow/libstub/trunk
@@ -10,4 +11,4 @@ ignore:
   - LibResInfo-2.0/LibStub/LibStub.toc
   - LibResInfo-2.0/CallbackHandler-1.0/CallbackHandler-1.0.xml
   - README.md
-  - WIKI.md
+  - API.md

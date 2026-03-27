@@ -12,15 +12,15 @@ local info = MyAddon:GetIncomingResInfo("player")
 
 ## Table of Contents
 
-- [APIs](#apis)
-  - [GetIncomingResInfo](#getincomingresinfounit)
-  - [UnitHasIncomingRes](#unithasincomingresunit)
-- [Callbacks](#callbacks)
-  - [LRI2_ResStarted](#lri2_resstartedcallback-infotable)
-  - [LRI2_ResPending](#lri2_respendingcallback-infotable)
-  - [LRI2_ResSuccess](#lri2_ressuccesscallback-infotable)
-  - [LRI2_ResExpired](#lri2_resexpiredcallback-infotable)
-- [Info Table](#info-table)
+- APIs
+  - GetIncomingResInfo
+  - GetUnitIDFromGUID
+- Callbacks
+  - LRI2_UnitResStarted
+  - LRI2_UnitResPending
+  - LRI2_UnitResSuccess
+  - LRI2_UnitResExpired
+- Info Table
 
 ---
 
@@ -28,18 +28,19 @@ local info = MyAddon:GetIncomingResInfo("player")
 
 ---
 
-### `GetIncomingResInfo(unit)`
+### `GetIncomingResInfo(unitOrGUID)`
 
 Returns res information about the unit.
 
 Arguments
 
-- `unit` *(string)*
-  A valid unitID (e.g. `"player"`, `"target"`, `"party1"`)
+- unitOrGUID (string)
+  A valid unitID (e.g. "player", "target", "party1")
+  or a unitGUID
 
 Returns
 
-- `infoTable` *(table|nil)*
+- infoTable (table or nil)
   Returns nil if no resurrection is active.
 
 Example
@@ -54,23 +55,26 @@ end
 
 ---
 
-### `UnitHasIncomingRes(unit)`
+### `GetUnitIDFromGUID(guid)`
 
-Returns whether the unit has an incoming resurrection.
+Returns a valid unitID for the given GUID if one is currently known and valid.
 
 Arguments
 
-- `unit` *(string)*
+- guid (string)
 
 Returns
 
-- `hasRes` *(boolean)*
+- unit (string or nil)
+  A valid unitID if available, otherwise nil.
 
 Example
 
 ```lua
-if MyAddon:UnitHasIncomingRes("target") then
-    -- do something
+local unit = MyAddon:GetUnitIDFromGUID(guid)
+
+if unit then
+    print(UnitName(unit))
 end
 ```
 
@@ -81,12 +85,12 @@ end
 Callbacks are registered using:
 
 ```lua
-MyAddon:RegisterCallback("LRI2_ResPending")
+MyAddon:RegisterCallback("LRI2_UnitResPending")
 ```
 
 ---
 
-### `LRI2_ResStarted(callback, infoTable)`
+### `LRI2_UnitResStarted(callback, infoTable)`
 
 Fired when a resurrection cast is detected.
 
@@ -94,7 +98,7 @@ Fired when a resurrection cast is detected.
 
 ---
 
-### `LRI2_ResPending(callback, infoTable)`
+### `LRI2_UnitResPending(callback, infoTable)`
 
 Fired when the game confirms a resurrection is pending.
 
@@ -102,13 +106,13 @@ Fired when the game confirms a resurrection is pending.
 
 ---
 
-### `LRI2_ResSuccess(callback, infoTable)`
+### `LRI2_UnitResSuccess(callback, infoTable)`
 
 Fired when a resurrection successfully completes.
 
 ---
 
-### `LRI2_ResExpired(callback, infoTable)`
+### `LRI2_UnitResExpired(callback, infoTable)`
 
 Fired when a resurrection expires (not accepted in time).
 
@@ -145,32 +149,32 @@ info = {
 
 ### Field Notes
 
-#### `casterGUID`
+casterGUID
 
-- `string` → known caster
-- `false` → unknown or external caster
+- string → known caster
+- false → unknown or external caster
 
 ---
 
-#### `isFastest`
+isFastest
 
 Indicates whether this resurrection will resolve first for the target.
 
 ---
 
-#### `baseTexture` / `overrideTexture`
+baseTexture / overrideTexture
 
-- `baseTexture` → original spell icon
-- `overrideTexture` → modified icon (if applicable)
+- baseTexture → original spell icon
+- overrideTexture → modified icon (if applicable)
 
-If no modification exists, `overrideTexture` will be `nil`.
+If no modification exists, overrideTexture will be nil.
 
 ---
 
-#### `confidence`
+confidence
 
-- `"MEDIUM"` → inferred from observed spellcasting and timing
-- `"HIGH"` → confirmed by game-provided resurrection state
+- "MEDIUM" → inferred from observed spellcasting and timing
+- "HIGH" → confirmed by game-provided resurrection state
 
 ---
 
