@@ -1,4 +1,4 @@
-## Interface: 120001, 50503, 38000, 20505, 11508
+## Interface: 120005, 50503, 38001, 20505, 11508
 ## Title: Lib: ResInfo-2.0
 ## Notes: Library to provide information about resurrections in your group
 ## Notes-deDE: @localization(locale="deDE", key="Notes", namespace="ToC")@
@@ -12,9 +12,11 @@
 ## Notes-zhCN: @localization(locale="zhCN", key="Notes", namespace="ToC")@
 ## Notes-zhTW: @localization(locale="zhTW", key="Notes", namespace="ToC")@
 ## Version: @project-version@
+## X-Date: @project-date@
 ## X-Project-Revision: @project-revision@
 
 ## Author: Paul Vandersypen
+## X-License: Copyrigbht © 2026 Paul Vandersypen. MIT License (https://opensource.org/licenses/MIT)
 ## Category: Libraries
 ## Category-deDE: Bibliotheken
 ## Category-esES: Bibliotecas
@@ -34,8 +36,7 @@
 
 ## X-Website:
 ## X-Credits: Phanx, for writing LibResInfo-1.0
-## X-License: MIT License
 
-## OptionalDeps: LibStub, CallbackHandler-1.0
-
+LibStub\LibStub.lua
+CallbackHandler-1.0\CallbackHandler-1.0.xml
 LibResInfo-2.0\lib.xml

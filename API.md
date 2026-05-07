@@ -4,181 +4,200 @@ All APIs and callbacks are embedded on the addon object.
 
 ```lua
 local MyAddon = LibStub("AceAddon-3.0"):NewAddon("MyAddon", "LibResInfo-2.0")
-
-local info = MyAddon:GetIncomingResInfo("player")
 ```
 
 ---
 
 ## Table of Contents
 
-- APIs
-  - GetIncomingResInfo
-  - GetUnitIDFromGUID
-- Callbacks
-  - LRI2_UnitResStarted
-  - LRI2_UnitResPending
-  - LRI2_UnitResSuccess
-  - LRI2_UnitResExpired
-- Info Table
+* APIs
+
+  * GetIncomingResInfo (placeholder)
+  * GetUnitIDFromGUID (placeholder)
+* Callbacks
+
+  * LRI_FastestResUpdated
+  * LRI_ResCastFinishedOnTargets
+  * LRI_ResCastStopped
 
 ---
 
-## APIs
+# APIs
+
+> ⚠️ These APIs are currently placeholders and may change.
 
 ---
 
-### `GetIncomingResInfo(unitOrGUID)`
+## `GetIncomingResInfo(unitOrGUID)`
 
-Returns res information about the unit.
+Returns resurrection information about a unit.
 
-Arguments
+### Arguments
 
-- unitOrGUID (string)
-  A valid unitID (e.g. "player", "target", "party1")
-  or a unitGUID
+* unitOrGUID (string)
+  A unitID (e.g. `"player"`, `"target"`, `"party1"`)
+  or a unit GUID.
 
-Returns
+### Returns
 
-- infoTable (table or nil)
-  Returns nil if no resurrection is active.
-
-Example
-
-```lua
-local info = MyAddon:GetIncomingResInfo("player")
-
-if info then
-    print(info.spellID)
-end
-```
+* infoTable (table or nil)
+  Returns `nil` if no resurrection data is available.
 
 ---
 
-### `GetUnitIDFromGUID(guid)`
+## `GetUnitIDFromGUID(guid)`
 
-Returns a valid unitID for the given GUID if one is currently known and valid.
+Returns a valid unitID for the given GUID if one is currently known.
 
-Arguments
+### Arguments
 
-- guid (string)
+* guid (string)
 
-Returns
+### Returns
 
-- unit (string or nil)
-  A valid unitID if available, otherwise nil.
-
-Example
-
-```lua
-local unit = MyAddon:GetUnitIDFromGUID(guid)
-
-if unit then
-    print(UnitName(unit))
-end
-```
+| Field | Type          | Description                                  |
+| ----- | ------------- | -------------------------------------------- |
+| unit  | string or nil | A valid unitID if available, otherwise `nil` |
 
 ---
 
-## Callbacks
+# Callbacks
 
 Callbacks are registered using:
 
 ```lua
-MyAddon:RegisterCallback("LRI2_UnitResPending")
+MyAddon:RegisterCallback("LRI_FastestResUpdated")
 ```
 
 ---
 
-### `LRI2_UnitResStarted(callback, infoTable)`
+## `LRI_FastestResUpdated(callback, returns)`
 
-Fired when a resurrection cast is detected.
+Fired when the fastest resurrection changes for one or more targets.
 
-- Confidence: MEDIUM (inferred)
+This includes:
 
----
-
-### `LRI2_UnitResPending(callback, infoTable)`
-
-Fired when the game confirms a resurrection is pending.
-
-- Confidence: HIGH
+* A new fastest cast begins
+* A faster cast replaces a previous one
+* No valid resurrection remains for a target
 
 ---
 
-### `LRI2_UnitResSuccess(callback, infoTable)`
+### Returns
 
-Fired when a resurrection successfully completes.
-
----
-
-### `LRI2_UnitResExpired(callback, infoTable)`
-
-Fired when a resurrection expires (not accepted in time).
-
----
-
-## Info Table
-
-All APIs and callbacks return the same structure.
-
-```lua
-info = {
-    state = "CASTING" | "PENDING" | "SUCCESS" | "EXPIRED",
-
-    targetGUID = string,
-    casterGUID = string|false,
-
-    spellID = number|nil,
-
-    castStartTime = number|nil,
-    castEndTime = number|nil,
-
-    expiresAt = number|nil,
-
-    confidence = "MEDIUM" | "HIGH",
-
-    isFastest = boolean,
-
-    baseTexture = number|nil,
-    overrideTexture = number|nil,
-}
-```
+| Field     | Type              | Description                                                      |
+| --------- | ----------------- | ---------------------------------------------------------------- |
+| targets   | table<string>     | List of target GUIDs affected by this update                     |
+| isFastest | string or nil     | Caster GUID of the fastest resurrection, or `nil` if none exists |
+| startTime | number (optional) | Cast start time in milliseconds                                  |
+| endTime   | number (optional) | Cast end time in milliseconds                                    |
 
 ---
 
-### Field Notes
+### Notes
 
-casterGUID
-
-- string → known caster
-- false → unknown or external caster
+* Fired only when the fastest result changes
+* Each target has at most one fastest caster at any time
 
 ---
 
-isFastest
+## `LRI_ResCastFinishedOnTargets(callback, returns)`
 
-Indicates whether this resurrection will resolve first for the target.
+Fired when a resurrection cast successfully completes.
 
----
-
-baseTexture / overrideTexture
-
-- baseTexture → original spell icon
-- overrideTexture → modified icon (if applicable)
-
-If no modification exists, overrideTexture will be nil.
+This does not indicate that the target is alive, only that the cast finished.
 
 ---
 
-confidence
+### Returns
 
-- "MEDIUM" → inferred from observed spellcasting and timing
-- "HIGH" → confirmed by game-provided resurrection state
+| Field      | Type          | Description                               |
+| ---------- | ------------- | ----------------------------------------- |
+| casterGUID | string        | GUID of the caster whose spell completed  |
+| targets    | table<string> | List of target GUIDs affected by the cast |
 
 ---
 
-## Notes
+### Notes
 
-- All returned tables are copies (safe to read, do not modify)
-- Data is best-effort and may be incomplete depending on game limitations
+* Fired once per completed cast
+* Applies to both single-target and mass resurrection spells
+
+---
+
+## `LRI_ResCastStopped(callback, returns)`
+
+Fired when a resurrection cast stops before completion.
+
+This includes:
+
+* interrupted
+* failed
+* cancelled
+
+---
+
+### Returns
+
+| Field | Type         | Description                                                       |
+| ----- | ------------ | ----------------------------------------------------------------- |
+| state | table or nil | Current internal caster state, or `nil` if no active casts remain |
+
+---
+
+### Notes
+
+* This callback reflects caster-side state changes
+* Target-level updates are reported through `LRI_FastestResUpdated`
+
+---
+
+# Data Model Notes
+
+---
+
+## Per-Target Resolution
+
+Resurrection tracking is performed independently per target.
+
+* Multiple casters may attempt to resurrect the same target
+* Only one cast is considered the fastest for that target
+
+---
+
+## Fastest Resolution Rules
+
+* The fastest cast is determined by the earliest endTime
+* When a cast succeeds, the race for that target ends
+* No other casts are considered after a successful cast
+
+---
+
+## Timing
+
+* All times are expressed in milliseconds
+* Derived from:
+
+  * `UnitCastingInfo`
+  * `C_Spell.GetSpellInfo`
+  * Event timing
+
+---
+
+## Safety
+
+* Tables returned to callbacks should be treated as read-only
+* Internal state should not be modified by consuming addons
+
+---
+
+# Summary
+
+LibResInfo-2.0 provides:
+
+* Accurate resurrection tracking
+* Per-target fastest cast resolution
+* Consistent and predictable callback data
+* Minimal unnecessary callback firing through change detection
+
+---

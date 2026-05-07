@@ -3,12 +3,11 @@ wowi-archive-previous: no
 enable-nolib-creation: no
 
 externals:
-  LibResInfo-2.0/LibStub: https://repos.curseforge.com/wow/libstub/trunk
-  LibResInfo-2.0/CallbackHandler-1.0: https://repos.curseforge.com/wow/callbackhandler/trunk/CallbackHandler-1.0
+  LibStub: https://repos.curseforge.com/wow/libstub/trunk
+  CallbackHandler-1.0: https://repos.curseforge.com/wow/callbackhandler/trunk/CallbackHandler-1.0
 
 ignore:
-  - LibResInfo-2.0/LibStub/tests
-  - LibResInfo-2.0/LibStub/LibStub.toc
-  - LibResInfo-2.0/CallbackHandler-1.0/CallbackHandler-1.0.xml
+  - LibStub/tests
+  - LibStub/LibStub.toc
   - README.md
   - API.md

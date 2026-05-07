@@ -19,10 +19,38 @@ if not lib then return end
 local CallbackHandler = LibStub("CallbackHandler-1.0")
 
 lib.callbacks = lib.callbacks or CallbackHandler:New(lib,
-    "RegisterCallback",
-    "UnregisterCallback",
-    "UnregisterAllCallbacks"
+	"ResCast_Started",
 )
+
+lib.embeds = lib.embeds or {}
+
+-- -------------------------------------------------------------------
+-- Events registration
+-- -------------------------------------------------------------------
+local events = {
+	["UNIT_SPELLCAST_START"]		= true,
+	["UNIT_SPELLCAST_STOP"]			= true,
+	["UNIT_SPELLCAST_SUCCEEDED"]	= true,
+	["UNIT_SPELLCAST_FAILED"]		= true,
+	["UNIT_SPELLCAST_FAILED_QUIET"]	= true,
+	["UNIT_SPELLCAST_INTERRUPTED"]	= true,
+	["INCOMING_RESURRECT_CHANGED"]	= true,
+	["UNIT_HEALTH"]					= true,
+}
+
+local frame = CreateFrame("Frame")
+frame:SetScript("OnEvent", function(self, event, ...)
+	self[event](self, event, ...)
+end)
+
+for k in pairs(events) do
+	frame:RegisterEvent(k)
+end
+
+-- These events result in the same state changes, so we can handle them with the same function
+lib.UNIT_SPELLCAST_FAILED			= lib.UNIT_SPELLCAST_STOP
+lib.UNIT_SPELLCAST_FAILED_QUIET		= lib.UNIT_SPELLCAST_STOP
+lib.UNIT_SPELLCAST_INTERRUPTED		= lib.UNIT_SPELLCAST_STOP
 
 -- -------------------------------------------------------------------
 -- WoW API
@@ -32,512 +60,224 @@ local UnitGUID = UnitGUID
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local UnitHasIncomingResurrection = UnitHasIncomingResurrection
 local UnitCastingInfo = UnitCastingInfo
-local GetTime = GetTime
-local CreateFrame = CreateFrame
+local UnitNameFromGUID = UnitNameFromGUID
+local GetSpellInfo = C_Spell.GetSpellInfo
+local After = C_Timer.After
+local GetNumGroupMembers = GetNumGroupMembers
 
 -- -------------------------------------------------------------------
 -- Internal state
 -- -------------------------------------------------------------------
 
--- GUID → last known valid unitID (validation only)
-local UnitFromGUID = {}
+-- Resurrection state by caster GUID
+local resCastersInfo = {}
 
 -- Resurrection state by target GUID
-local ResByTarget = {}
+local resTargetsInfo = {}
 
--- Active cast tracking (pre-target association)
-local ActiveCasters = {}
-
--- -------------------------------------------------------------------
--- Unit tracking / validation
--- -------------------------------------------------------------------
-
-local function TrackUnit(unit)
-    if not unit then return end
-
-    local guid = UnitGUID(unit)
-    if not guid then return end
-
-    local existing = UnitFromGUID[guid]
-
-    -- Update mapping only if missing or stale
-    if not existing or UnitGUID(existing) ~= guid then
-        UnitFromGUID[guid] = unit
-    end
-
-    return guid
-end
-
-local function ResolveUnit(guid)
-    local unit = UnitFromGUID[guid]
-
-    if unit and UnitGUID(unit) == guid then
-        return unit
-    end
-end
-
-local function ClearUnitMapping(guid)
-    UnitFromGUID[guid] = nil
-end
+local massResTargets = {}
+local callbackPending
+local massResScanPending
 
 -- -------------------------------------------------------------------
--- Spell registry
+-- Spell tables
 -- -------------------------------------------------------------------
 
-local RES_SPELLS = {
-    -- Priest
-    [2006]   = true, -- Resurrection
+local SINGLE_TARGET_RES_SPELLS = {
+	-- Priest
+	[2006]		= true,		-- Resurrection
 
-    -- Paladin
-    [7328]   = true, -- Redemption
+	-- Paladin
+	[7328]		= true,		-- Redemption
 
-    -- Shaman
-    [2008]   = true, -- Ancestral Spirit
+	-- Shaman
+	[2008]		= true,		-- Ancestral Spirit
 
-    -- Druid
-    [50769]  = true, -- Revive
+	-- Druid
+	[50769]		= true,		-- Revive
 
-    -- Monk
-    [115178] = true, -- Resuscitate
+	-- Monk
+	[115178]	= true,		-- Resuscitate
 
-    -- Hunter
-    [982]    = true, -- Revive Pet
+	-- Hunter
+	[982]		= true,		-- Revive Pet
 
-    -- Engineering
-    [8342]   = true, -- Goblin Jumper Cables
-    [22999]  = true, -- Goblin Jumper Cables XL
-    [54732]  = true, -- Gnomish Army Knife
-    [164729] = true, -- Ultimate Gnomish Army Knife
+	-- Evoker
+	[361227]	= true,		-- Return
 
-    -- World / Object
-    [199119] = true, -- Failure Detection Aura
-    [187777] = true, -- Reawaken (Brazier)
+	-- Engineering
+	[8342]		= true,		-- Goblin Jumper Cables
+	[22999]		= true,		-- Goblin Jumper Cables XL
+	[54732]		= true,		-- Gnomish Army Knife
+	[164729]	= true,		-- Ultimate Gnomish Army Knife
 
-    -- Combat res
-    [20484]  = true, -- Rebirth
-    [61999]  = true, -- Raise Ally
-    [20707]  = true, -- Soulstone Resurrection
+	-- Combat res
+	[20484]		= true,		-- Rebirth
+	[61999]		= true,		-- Raise Ally
+	[20707]		= true,		-- Soulstone Resurrection
 
-    -- Mass res
-    [212056] = true, -- Absolution
-    [212048] = true, -- Ancestral Vision
-    [212036] = true, -- Mass Resurrection
-    [212051] = true, -- Reawaken (Monk)
-    [212040] = true, -- Revitalize
+	-- World / Object
+	[199119]	= true,		-- Failure Detection Aura (this is a res aura, and will be moved out of this table later)
+	[187777]	= true,		-- Reawaken (Brazier of Awakening)
 }
+
+local MASS_RES_SPELLS = {
+	-- Priest
+	[212056]	= true,		-- Absolution
+
+	-- Shaman
+	[212048]	= true,		-- Ancestral Vision
+
+	-- Priest
+	[212036]	= true,		-- Mass Resurrection
+
+	-- Monk
+	[212051]	= true,		-- Reawaken
+
+	-- Druid
+	[212040]	= true,		-- Revitalize
+
+	-- Evoker
+	[361178]	= true,		-- Mass Return
+}
+
+-- -------------------------------------------------------------------
+-- Constants
+-- -------------------------------------------------------------------
 
 local RES_PENDING_TIMEOUT = 60
+local PLAYER_GUID = UnitGUID("player")
 
 -- -------------------------------------------------------------------
--- Helpers
+-- Helper functions
 -- -------------------------------------------------------------------
 
-local function ResolveGUID(input)
-    if not input then return end
-
-    local guid = UnitGUID(input)
-    if guid then return guid end
-
-    if type(input) == "string" then
-        return input
-    end
+local function FireResCastStarted()
+	callbackPending = nil
+	lib.callbacks:Fire("ResCast_Started", resCastersInfo, resTargetsInfo)
 end
 
-local function CopyResInfo(src)
-    if not src then return end
-
-    return {
-        state = src.state,
-        targetGUID = src.targetGUID,
-        casterGUID = src.casterGUID,
-        spellID = src.spellID,
-        castStartTime = src.castStartTime,
-        castEndTime = src.castEndTime,
-        expiresAt = src.expiresAt,
-        confidence = src.confidence,
-        isFastest = src.isFastest,
-        baseTexture = src.baseTexture,
-        overrideTexture = src.overrideTexture,
-    }
+local function QueueResCastStarted()
+	if callbackPending then return end
+	callbackPending = true
+	After(0, FireResCastStarted)
 end
 
-local function GetUnitCastInfo(unit)
-    local _, _, _, startTime, endTime, _, _, _, spellID = UnitCastingInfo(unit)
+local function ScanMassResTargets(casterGUID, casterInfo)
+	massResScanPending = nil
+	local groupType = IsInRaid() and "raid" or "party"
 
-    if startTime and endTime then
-        return spellID, startTime / 1000, endTime / 1000
-    end
+	for i = 1, GetNumGroupMembers() do
+		local UnitID = groupType .. i
 
-    return spellID, nil, nil
-end
+		if UnitIsDeadOrGhost(UnitID) and UnitHasIncomingResurrection(UnitID) then
+			local targetGUID = UnitGUID(UnitID)
 
-local function GetSpellTextures(spellID)
-    if not spellID or not C_Spell then return end
+			if targetGUID and not resTargetsInfo[targetGUID] and not massResTargets[casterGUID][targetGUID] then
+				massResTargets[casterGUID][targetGUID] = true
 
-    local info = C_Spell.GetSpellInfo(spellID)
-    if not info then return end
+				resTargetsInfo[targetGUID] = {
+					castTime = casterInfo.castTime,
+					casterGUID = casterGUID,
+				}
+			end
+		end
+	end
 
-    local icon = info.iconID
-    local base = info.originalIconID
-
-    if base and icon ~= base then
-        return base, icon
-    end
-
-    return icon, nil
+	QueueResCastStarted()
 end
 
 -- -------------------------------------------------------------------
--- Fastest calculation
+-- Event handlers
 -- -------------------------------------------------------------------
 
-local function UpdateFastestCaster(targetGUID)
-    local entry = ResByTarget[targetGUID]
-    if not entry then return end
+-- A resurrection spellcast has started. We don't know the target yet, so we just record the caster's intent.
+function lib:UNIT_SPELLCAST_START(_, unitID, _, spellID)
+	local casterGUID = UnitGUID(unitID)
+	-- We recorded this caster, exit early to avoid duplicate tracking for the same active resurrection cast.
+	if resCastersInfo[casterGUID] then return end
+	-- Only track if it's a resurrection spell.
+	if not SINGLE_TARGET_RES_SPELLS[spellID] and not MASS_RES_SPELLS[spellID] then return end
+	-- Can't track without a GUID, exit early.
+	if not casterGUID then return end
 
-    local fastestTime
-    local fastestCasterGUID
-    local foundKnownTime = false
+	local _, textureID, startTime, endTime, castTime, unitName, unitRealm
+	_, _, textureID, startTime, endTime = UnitCastingInfo(unitID)
+	if startTime and endTime then
+		castTime = (endTime - startTime) / 1000
+	end
+	local spellInfo = GetSpellInfo(spellID)
 
-    for casterGUID, info in pairs(entry.casters) do
-        local t = info.castEndTime
+	resCastersInfo[casterGUID] = {
+		spellID = spellID or (spellInfo and spellInfo.spellID),
+		textureID = textureID or (spellInfo and spellInfo.iconID),
+		castTime = castTime or (spellInfo and spellInfo.castTime and (spellInfo.castTime / 1000)),
+	}
 
-        if t then
-            foundKnownTime = true
-            if not fastestTime or t < fastestTime then
-                fastestTime = t
-                fastestCasterGUID = casterGUID
-            end
-        end
-    end
+	if MASS_RES_SPELLS[spellID] then
+		massResTargets[casterGUID] = {}
+	end
 
-    if not foundKnownTime then
-        for casterGUID in pairs(entry.casters) do
-            fastestCasterGUID = casterGUID
-            break
-        end
-    end
+	-- Get the caster's name for RESURRECT_REQUEST, which only passes in the caster's name and not GUID.
+	unitName, unitRealm = UnitNameFromGUID(casterGUID)
 
-    entry.fastestCasterGUID = fastestCasterGUID
-
-    for casterGUID, info in pairs(entry.casters) do
-        info.isFastest = (casterGUID == fastestCasterGUID)
-    end
+	if unitName and unitRealm then
+		resCastersInfo[casterGUID].casterName = unitName .. "-" .. unitRealm
+		if MASS_RES_SPELLS[spellID] then
+			massResTargets[casterGUID].casterName = resCastersInfo[casterGUID].casterName
+		end
+	elseif unitName and not unitRealm then
+		resCastersInfo[casterGUID].casterName = unitName
+		if MASS_RES_SPELLS[spellID] then
+			massResTargets[casterGUID].casterName = resCastersInfo[casterGUID].casterName
+		end
+	end
 end
 
-local function Fire(event, data)
-    lib.callbacks:Fire(event, CopyResInfo(data))
-end
+-- A targetID has an incoming resurrection. Verify the targetID is being tracked
+function lib:INCOMING_RESURRECT_CHANGED(_, targetID)
+	if not UnitHasIncomingResurrection(targetID) then return end
 
--- -------------------------------------------------------------------
--- State machine
--- -------------------------------------------------------------------
+	local targetGUID = UnitGUID(targetID)
+	if not targetGUID then return end
+	if resTargetsInfo[targetGUID] then return end
 
-local function SetResState(targetGUID, newState, data)
-    local entry = ResByTarget[targetGUID]
+	for casterGUID, casterInfo in pairs(resCastersInfo) do
+		if SINGLE_TARGET_RES_SPELLS[casterInfo.spellID] and not casterInfo.targetGUID then
+			casterInfo.targetGUID = targetGUID
 
-    if not entry then
-        entry = { casters = {}, fastestCasterGUID = nil }
-        ResByTarget[targetGUID] = entry
-    end
+			resTargetsInfo[targetGUID] = {
+				castTime = casterInfo.castTime,
+				casterGUID = casterGUID,
+			}
 
-    local casterGUID = data.casterGUID or false
-    data.casterGUID = casterGUID
-
-    local baseTexture, overrideTexture = GetSpellTextures(data.spellID)
-    data.baseTexture = baseTexture
-    data.overrideTexture = overrideTexture
-
-    local existing = entry.casters[casterGUID]
-
-    if not existing or existing.state ~= newState then
-        entry.casters[casterGUID] = data
-
-        UpdateFastestCaster(targetGUID)
-
-        if newState == "CASTING" then
-            Fire("LRI2_UnitResStarted", data)
-        elseif newState == "PENDING" then
-            Fire("LRI2_UnitResPending", data)
-        elseif newState == "SUCCESS" then
-            Fire("LRI2_UnitResSuccess", data)
-        elseif newState == "EXPIRED" then
-            Fire("LRI2_UnitResExpired", data)
-        end
-    end
+			QueueResCastStarted()
+			return
+		elseif MASS_RES_SPELLS[casterInfo.spellID] and massResTargets[casterGUID] then
+			if massResScanPending then return end
+			massResScanPending = true
+			After(0, function()
+				ScanMassResTargets(casterGUID, casterInfo)
+			end)
+			return
+		end
+	end
 end
 
 -- -------------------------------------------------------------------
--- Events
+-- Embed mixins into target addon objects
 -- -------------------------------------------------------------------
 
-local frame = CreateFrame("Frame")
-
-frame:SetScript("OnEvent", function(self, event, ...)
-    if self[event] then
-        self[event](self, event, ...)
-    end
-end)
-
-function frame:UNIT_SPELLCAST_START(event, unit)
-    local casterGUID = TrackUnit(unit)
-    if not casterGUID then return end
-
-    local spellID, startTime, endTime = GetUnitCastInfo(unit)
-    if not spellID or not RES_SPELLS[spellID] then return end
-
-    ActiveCasters[casterGUID] = {
-        spellID = spellID,
-        castStartTime = startTime,
-        castEndTime = endTime,
-    }
-end
-
-function frame:UNIT_SPELLCAST_SUCCEEDED(event, unit, _, spellID)
-    local casterGUID = TrackUnit(unit)
-    if not casterGUID then return end
-
-    if not spellID or not RES_SPELLS[spellID] then return end
-
-    local now = GetTime()
-
-    ActiveCasters[casterGUID] = {
-        spellID = spellID,
-        castStartTime = now,
-        castEndTime = now,
-    }
-end
-
-local function ClearActiveCaster(unit)
-    local casterGUID = TrackUnit(unit)
-    if not casterGUID then return end
-
-    local data = ActiveCasters[casterGUID]
-
-    if data and not data.targetGUID then
-        ActiveCasters[casterGUID] = nil
-    end
-end
-
-function frame:UNIT_SPELLCAST_INTERRUPTED(event, unit)
-    ClearActiveCaster(unit)
-end
-
-function frame:UNIT_SPELLCAST_FAILED(event, unit)
-    ClearActiveCaster(unit)
-end
-
-function frame:UNIT_SPELLCAST_STOP(event, unit)
-    ClearActiveCaster(unit)
-end
-
-function frame:INCOMING_RESURRECT_CHANGED(event, unit)
-    local targetGUID = TrackUnit(unit)
-    if not targetGUID then return end
-
-    if not UnitHasIncomingResurrection(unit) then return end
-
-    local casterGUID, castData
-
-    for candidateCasterGUID, data in pairs(ActiveCasters) do
-        if not data.targetGUID then
-            casterGUID = candidateCasterGUID
-            castData = data
-            break
-        end
-    end
-
-    if castData then
-        castData.targetGUID = targetGUID
-        ActiveCasters[casterGUID] = nil
-    end
-
-    SetResState(targetGUID, "CASTING", {
-        state = "CASTING",
-        targetGUID = targetGUID,
-        casterGUID = casterGUID,
-        spellID = castData and castData.spellID,
-        castStartTime = castData and castData.castStartTime,
-        castEndTime = castData and castData.castEndTime,
-        confidence = "MEDIUM",
-    })
-
-    SetResState(targetGUID, "PENDING", {
-        state = "PENDING",
-        targetGUID = targetGUID,
-        casterGUID = casterGUID,
-        spellID = castData and castData.spellID,
-        expiresAt = GetTime() + RES_PENDING_TIMEOUT,
-        confidence = "HIGH",
-    })
-end
-
-function frame:RESURRECT_REQUEST()
-    local guid = UnitGUID("player")
-    if not guid then return end
-
-    SetResState(guid, "PENDING", {
-        state = "PENDING",
-        targetGUID = guid,
-        casterGUID = false,
-        expiresAt = GetTime() + RES_PENDING_TIMEOUT,
-        confidence = "HIGH",
-    })
-end
-
-function frame:UNIT_FLAGS(event, unit)
-    local guid = TrackUnit(unit)
-    if not guid then return end
-
-    local entry = ResByTarget[guid]
-    if not entry then return end
-
-    if not UnitIsDeadOrGhost(unit) then
-        local fastest = entry.fastestCasterGUID
-        local data = fastest and entry.casters[fastest]
-
-        if data then
-            SetResState(guid, "SUCCESS", data)
-        end
-
-        ResByTarget[guid] = nil
-        ClearUnitMapping(guid)
-    end
-end
-
--- -------------------------------------------------------------------
--- Expiration
--- -------------------------------------------------------------------
-
-local elapsed = 0
-
-local function OnUpdate(self, delta)
-    elapsed = elapsed + delta
-    if elapsed < 0.5 then return end
-    elapsed = 0
-
-    if not next(ResByTarget) then
-        self:SetScript("OnUpdate", nil)
-        return
-    end
-
-    local now = GetTime()
-
-    for guid, entry in pairs(ResByTarget) do
-        for casterGUID, data in pairs(entry.casters) do
-            if data.state == "PENDING" and data.expiresAt and now > data.expiresAt then
-                local unit = ResolveUnit(guid)
-
-                if unit and UnitHasIncomingResurrection(unit) then
-                    data.expiresAt = now + RES_PENDING_TIMEOUT
-                else
-                    SetResState(guid, "EXPIRED", data)
-                    entry.casters[casterGUID] = nil
-                end
-            end
-        end
-
-        if not next(entry.casters) then
-            ResByTarget[guid] = nil
-            ClearUnitMapping(guid)
-        else
-            UpdateFastestCaster(guid)
-        end
-    end
-end
-
--- -------------------------------------------------------------------
--- Event registration
--- -------------------------------------------------------------------
-
-frame:RegisterEvent("UNIT_SPELLCAST_START")
-frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-frame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
-frame:RegisterEvent("UNIT_SPELLCAST_FAILED")
-frame:RegisterEvent("UNIT_SPELLCAST_STOP")
-frame:RegisterEvent("INCOMING_RESURRECT_CHANGED")
-frame:RegisterEvent("RESURRECT_REQUEST")
-frame:RegisterEvent("UNIT_FLAGS")
-
-frame:SetScript("OnUpdate", OnUpdate)
-
--- -------------------------------------------------------------------
--- Public API
--- -------------------------------------------------------------------
-
-lib.API = {}
-
-function lib.API:GetIncomingResInfo(unitOrGUID)
-    local guid = ResolveGUID(unitOrGUID)
-    if not guid then return end
-
-    local entry = ResByTarget[guid]
-    if not entry then return end
-
-    local fastest = entry.fastestCasterGUID
-    if not fastest then return end
-
-    return CopyResInfo(entry.casters[fastest])
-end
-
-function lib.API:GetUnitIDFromGUID(guid)
-    if not guid then return end
-
-    local unit = UnitFromGUID[guid]
-
-    if unit and UnitGUID(unit) == guid then
-        return unit
-    end
-end
-
--- -------------------------------------------------------------------
--- Callback wrappers
--- -------------------------------------------------------------------
-
-function lib:RegisterCallback(...)
-    return self.callbacks.RegisterCallback(self, ...)
-end
-
-function lib:UnregisterCallback(...)
-    return self.callbacks.UnregisterCallback(self, ...)
-end
-
-function lib:UnregisterAllCallbacks(...)
-    return self.callbacks.UnregisterAllCallbacks(self, ...)
-end
-
--- -------------------------------------------------------------------
--- API mixin (expose API on lib)
--- -------------------------------------------------------------------
-
-for name, func in pairs(lib.API) do
-    lib[name] = func
-end
-
--- -------------------------------------------------------------------
--- Embedding support
--- -------------------------------------------------------------------
-lib.mixinTargets = lib.mixinTargets or {}
--- -------------------------------------------------------------------
-
-local mixins = {
-    "GetIncomingResInfo",
-    "GetUnitIDFromGUID",
-    "RegisterCallback",
-    "UnregisterCallback",
-    "UnregisterAllCallbacks",
-}
+local mixins = {"ResCast_Started", }
 
 function lib:Embed(target)
-    for _, name in ipairs(mixins) do
-        target[name] = self[name]
-    end
-
-    self.mixinTargets[target] = true
-    return target
+	for _, v in pairs(mixins) do
+		target[v] = self[v]
+	end
+	self.embeds[target] = true
+	return target
 end
 
--- Re-embed existing targets on upgrade
-for target in pairs(lib.mixinTargets) do
-    lib:Embed(target)
+for target in pairs(lib.embeds) do
+	lib:Embed(target)
 end
