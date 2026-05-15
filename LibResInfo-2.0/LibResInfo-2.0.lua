@@ -50,6 +50,13 @@ local GetTime = GetTime
 local type = type
 local GetNamePlates = C_NamePlate.GetNamePlates
 local After = C_Timer.After
+local UnitHealth = UnitHealth
+local GetNumGroupMembers = GetNumGroupMembers
+local IsInRaid = IsInRaid
+local UnitExists = UnitExists
+local UnitIsDeadOrGhost = UnitIsDeadOrGhost
+local InCombatLockdown = InCombatLockdown
+local UnitAffectingCombat = UnitAffectingCombat
 
 ---@class NamePlateFrame
 ---@field unitToken string
@@ -66,6 +73,9 @@ local massResCasterInfo = {}
 
 -- Resurrection state by target GUID
 local resTargetInfo = {}
+
+-- Target GUIDs whose resurrection cast has finished, but whose alive state has not yet been observed.
+local ressedTargetGUIDs = {}
 
 -- -------------------------------------------------------------------
 -- Spell tables
@@ -163,6 +173,8 @@ local events = {
 	["UNIT_SPELLCAST_STOP"]			= true,
 	["UNIT_SPELLCAST_SUCCEEDED"]	= true,
 	["UNIT_SPELLCAST_SENT"]			= true,
+	["PLAYER_ALIVE"]				= true,
+	["PLAYER_UNGHOST"]				= true,
 }
 
 -- -------------------------------------------------------------------
@@ -343,6 +355,35 @@ local function NormalizeCallbackTable(info)
 	return info
 end
 
+local function MarkRessedTargetGUID(targetGUID)
+	if targetGUID and targetGUID ~= "UNKNOWN" then
+		ressedTargetGUIDs[targetGUID] = true
+	end
+end
+
+local function MarkMassResTargets()
+	local playerGUID = UnitGUID("player")
+
+	if playerGUID and UnitIsDeadOrGhost("player") then
+		ressedTargetGUIDs[playerGUID] = true
+	end
+
+	local prefix = IsInRaid() and "raid" or "party"
+	local members = GetNumGroupMembers()
+
+	for i = 1, members do
+		local unitID = prefix .. i
+
+		if UnitExists(unitID) and UnitIsDeadOrGhost(unitID) then
+			local targetGUID = UnitGUID(unitID)
+
+			if targetGUID then
+				ressedTargetGUIDs[targetGUID] = true
+			end
+		end
+	end
+end
+
 local function RemoveSingleResCast(casterGUID, targetGUID, updateFastest, removeTargetInfo)
 	if not casterGUID then return end
 
@@ -416,9 +457,49 @@ local function FinishResCast(casterGUID, targetGUID)
 	local finishedCasterInfo = resCasterInfo[casterGUID]
 	local finishedTargetInfo = resTargetInfo[targetGUID]
 
+	MarkRessedTargetGUID(targetGUID)
+
 	lib.callbacks:Fire("ResCast_Finished", casterGUID, targetGUID, NormalizeCallbackTable(finishedCasterInfo), NormalizeCallbackTable(finishedTargetInfo))
 
 	RemoveSingleResCast(casterGUID, targetGUID, false, false)
+end
+
+-- Clean up known targetGUIDs if the target is alive.
+local function RemoveTargetResInfo(targetGUID)
+	if not targetGUID or not resTargetInfo[targetGUID] then return end
+
+	for casterGUID, info in pairs(resTargetInfo[targetGUID]) do
+		if type(info) == "table" then
+			resCasterInfo[casterGUID] = nil
+		end
+	end
+
+	resTargetInfo[targetGUID] = nil
+
+	return true
+end
+
+-- Clean up unknown targetGUIDs automatically after 60 seconds once a cast is successful.
+local function RemoveExpiredUnknownTargetInfo()
+	local targetInfo = resTargetInfo["UNKNOWN"]
+	if not targetInfo then return end
+
+	local now = GetTime()
+	local removed
+
+	for casterGUID, info in pairs(targetInfo) do
+		if type(info) == "table" and info.endTime and (now - info.endTime) >= RES_PENDING_TIMEOUT then
+			resCasterInfo[casterGUID] = nil
+			targetInfo[casterGUID] = nil
+			removed = true
+		end
+	end
+
+	if removed and not HasTargetCasterEntries("UNKNOWN") then
+		resTargetInfo["UNKNOWN"] = nil
+	end
+
+	return removed
 end
 
 -- -------------------------------------------------------------------
@@ -434,6 +515,7 @@ function lib:PLAYER_LOGIN()
 	wipe(resCasterInfo)
 	wipe(massResCasterInfo)
 	wipe(resTargetInfo)
+	wipe(ressedTargetGUIDs)
 
 	for k, v in pairs(events) do
 		if v then
@@ -449,6 +531,8 @@ function lib:PLAYER_LOGIN()
 	lib.UNIT_SPELLCAST_FAILED			= lib.UNIT_SPELLCAST_STOP
 	lib.UNIT_SPELLCAST_FAILED_QUIET		= lib.UNIT_SPELLCAST_STOP
 	lib.UNIT_SPELLCAST_INTERRUPTED		= lib.UNIT_SPELLCAST_STOP
+	lib.PLAYER_ALIVE					= lib.UNIT_HEALTH
+	lib.PLAYER_UNGHOST					= lib.UNIT_HEALTH
 end
 
 -- Update the player's GUID if they changed factions.
@@ -726,9 +810,11 @@ function lib:UNIT_SPELLCAST_SUCCEEDED(_, unitID, castGUID, spellID)
 		local finishedCasterInfo = resCasterInfo[casterGUID]
 		local finishedTargetInfo = resTargetInfo[targetGUID]
 
+		MarkRessedTargetGUID(targetGUID)
+
 		lib.callbacks:Fire("ResCast_Finished", casterGUID, targetGUID, NormalizeCallbackTable(finishedCasterInfo), NormalizeCallbackTable(finishedTargetInfo))
 
-		RemoveSingleResCast(casterGUID, targetGUID, false, true)
+		RemoveSingleResCast(casterGUID, targetGUID, false, false)
 	elseif MASS_RES_SPELLS[spellID] then
 		local casterInfo = massResCasterInfo[casterGUID]
 		if not casterInfo then return end
@@ -736,10 +822,30 @@ function lib:UNIT_SPELLCAST_SUCCEEDED(_, unitID, castGUID, spellID)
 
 		local finishedCasterInfo = massResCasterInfo[casterGUID]
 
+		MarkMassResTargets()
+
 		lib.callbacks:Fire("MassResCast_Finished", casterGUID, NormalizeCallbackTable(finishedCasterInfo))
 
 		RemoveMassResCast(casterGUID, false)
 	end
+end
+
+-- A res target is alive, so clean up any leftovers.
+function lib:UNIT_HEALTH(_, unitID)
+	unitID = unitID or "player"
+
+	local targetGUID = UnitGUID(unitID)
+	if not targetGUID then return end
+	if not ressedTargetGUIDs[targetGUID] then return end
+	if not UnitHealth(unitID) or UnitHealth(unitID) <= 0 then return end
+
+	ressedTargetGUIDs[targetGUID] = nil
+
+	RemoveTargetResInfo(targetGUID)
+
+	lib.callbacks:Fire("ResTargetGUID_IsAlive", targetGUID)
+
+	RemoveExpiredUnknownTargetInfo()
 end
 
 -- -------------------------------------------------------------------
