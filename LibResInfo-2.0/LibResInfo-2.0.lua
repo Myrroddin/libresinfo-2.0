@@ -48,6 +48,8 @@ local IsPlayerNeutral = IsPlayerNeutral
 local UnitFactionGroup = UnitFactionGroup
 local GetTime = GetTime
 local type = type
+local GetNamePlates = C_NamePlate.GetNamePlates
+local GetSpellInfo = C_Spell.GetSpellInfo
 
 -- -------------------------------------------------------------------
 -- Internal state
@@ -317,6 +319,76 @@ local function ReplaceUnknownTargetGUID(targetGUID, casterGUID)
 	end
 end
 
+-- Helper function to check if a targetGUID has any caster entries in resTargetInfo.
+-- This is used to determine if we can remove a targetGUID entry after a single-target resurrection cast ends, or if we need to keep it
+-- because there are other casts (single-target or mass) that are still active for that targetGUID.
+local function HasTargetCasterEntries(targetGUID)
+	if not targetGUID or not resTargetInfo[targetGUID] then return end
+
+	for _, info in pairs(resTargetInfo[targetGUID]) do
+		if type(info) == "table" then
+			return true
+		end
+	end
+end
+
+local function NormalizeCallbackTable(info)
+	if info and not next(info) then
+		return nil
+	end
+
+	return info
+end
+
+local function RemoveSingleResCast(casterGUID, targetGUID, updateFastest, removeTargetInfo)
+	if not casterGUID then return end
+
+	targetGUID = targetGUID or "UNKNOWN"
+
+	resCasterInfo[casterGUID] = nil
+
+	if resTargetInfo[targetGUID] then
+		resTargetInfo[targetGUID][casterGUID] = nil
+	end
+
+	local targetInfo
+	local changedTargetInfo
+
+	if removeTargetInfo and targetGUID ~= "UNKNOWN" then
+		resTargetInfo[targetGUID] = nil
+	elseif HasTargetCasterEntries(targetGUID) then
+		if updateFastest then
+			changedTargetInfo = UpdateFastestCasterGUID(targetGUID)
+		else
+			if resTargetInfo[targetGUID].fastestCasterGUID == casterGUID then
+				resTargetInfo[targetGUID].fastestCasterGUID = nil
+				resTargetInfo[targetGUID].fastestResType = nil
+				UpdateFastestCasterGUID(targetGUID)
+			end
+		end
+
+		targetInfo = resTargetInfo[targetGUID]
+	else
+		resTargetInfo[targetGUID] = nil
+	end
+
+	return NormalizeCallbackTable(resCasterInfo[casterGUID]), NormalizeCallbackTable(targetInfo), changedTargetInfo
+end
+
+local function RemoveMassResCast(casterGUID, updateFastest)
+	if not casterGUID then return end
+
+	massResCasterInfo[casterGUID] = nil
+
+	local changedTargetInfo
+
+	if updateFastest then
+		changedTargetInfo = UpdateAllFastestCasterGUIDs()
+	end
+
+	return NormalizeCallbackTable(massResCasterInfo[casterGUID]), changedTargetInfo
+end
+
 -- -------------------------------------------------------------------
 -- Event handlers
 -- -------------------------------------------------------------------
@@ -478,6 +550,109 @@ function lib:RESURRECT_REQUEST(_, inviterName)
 	-- We can't track if we're in any instance or in combat, exit early because we cannot scan nameplates.
 	if IsInInstance() then return end
 	if InCombatLockdown() or UnitAffectingCombat("player") then return end
+end
+
+-- A resurrection cast has ended, either stoppped, failed, or interrupted. Clear the relevant tables and fire the callback.
+function lib:UNIT_SPELLCAST_STOP(_, unitID, castGUID, spellID)
+	local casterGUID = UnitGUID(unitID)
+	if not casterGUID then return end
+	local targetInfo, changedTargetInfo
+
+	if SINGLE_TARGET_RES_SPELLS[spellID] then
+		local casterInfo = resCasterInfo[casterGUID]
+		if not casterInfo then return end
+		if casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+
+		local targetGUID = casterInfo.targetGUID or "UNKNOWN"
+
+		casterInfo, targetInfo, changedTargetInfo = RemoveSingleResCast(casterGUID, targetGUID, true, false)
+
+		lib.callbacks:Fire("ResCast_Stopped", casterGUID, targetGUID, casterInfo, targetInfo)
+
+		if changedTargetInfo then
+			lib.callbacks:Fire("FastestResChanged", changedTargetInfo)
+		end
+	elseif MASS_RES_SPELLS[spellID] then
+		local casterInfo = massResCasterInfo[casterGUID]
+		if not casterInfo then return end
+		if casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+
+		casterInfo, changedTargetInfo = RemoveMassResCast(casterGUID, true)
+
+		lib.callbacks:Fire("MassResCast_Stopped", casterGUID, casterInfo)
+
+		if changedTargetInfo then
+			for _, changedInfo in pairs(changedTargetInfo) do
+				if changedInfo then
+					lib.callbacks:Fire("FastestResChanged", changedInfo)
+				end
+			end
+		end
+	end
+end
+
+-- A spellcast succeeded. This could be an instant cast resurrection which wasn't tracked, or it could be a non-instant cast which successfully ended its lifecycle.
+function lib:UNIT_SPELLCAST_SUCCEEDED(_, unitID, castGUID, spellID)
+	local casterGUID = UnitGUID(unitID)
+	if not casterGUID then return end
+
+	if SINGLE_TARGET_RES_SPELLS[spellID] then
+		local casterInfo = resCasterInfo[casterGUID]
+		local wasTracked = casterInfo ~= nil
+
+		if casterInfo and casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+
+		local targetGUID
+
+		if wasTracked then
+			targetGUID = casterInfo.targetGUID or "UNKNOWN"
+		else
+			targetGUID = UnitGUID(UnitSpellTargetName(unitID)) or "UNKNOWN"
+		end
+
+		if not wasTracked then
+			local endTime = GetTime()
+
+			resCasterInfo[casterGUID] = resCasterInfo[casterGUID] or {}
+			resCasterInfo[casterGUID].castGUID = castGUID
+			resCasterInfo[casterGUID].casterGUID = casterGUID
+			resCasterInfo[casterGUID].castTime = 0
+			resCasterInfo[casterGUID].spellID = spellID
+			resCasterInfo[casterGUID].targetGUID = targetGUID
+			resCasterInfo[casterGUID].endTime = endTime
+
+			resTargetInfo[targetGUID] = resTargetInfo[targetGUID] or {}
+			resTargetInfo[targetGUID].targetGUID = targetGUID
+			resTargetInfo[targetGUID][casterGUID] = resTargetInfo[targetGUID][casterGUID] or {}
+			resTargetInfo[targetGUID][casterGUID].castGUID = castGUID
+			resTargetInfo[targetGUID][casterGUID].casterGUID = casterGUID
+			resTargetInfo[targetGUID][casterGUID].castTime = 0
+			resTargetInfo[targetGUID][casterGUID].spellID = spellID
+			resTargetInfo[targetGUID][casterGUID].targetGUID = targetGUID
+			resTargetInfo[targetGUID][casterGUID].endTime = endTime
+
+			UpdateFastestCasterGUID(targetGUID)
+
+			lib.callbacks:Fire("ResCast_Started", resCasterInfo[casterGUID], resTargetInfo[targetGUID])
+		end
+
+		local finishedCasterInfo = resCasterInfo[casterGUID]
+		local finishedTargetInfo = resTargetInfo[targetGUID]
+
+		lib.callbacks:Fire("ResCast_Finished", casterGUID, targetGUID, NormalizeCallbackTable(finishedCasterInfo), NormalizeCallbackTable(finishedTargetInfo))
+
+		RemoveSingleResCast(casterGUID, targetGUID, false, true)
+	elseif MASS_RES_SPELLS[spellID] then
+		local casterInfo = massResCasterInfo[casterGUID]
+		if not casterInfo then return end
+		if casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+
+		local finishedCasterInfo = massResCasterInfo[casterGUID]
+
+		lib.callbacks:Fire("MassResCast_Finished", casterGUID, NormalizeCallbackTable(finishedCasterInfo))
+
+		RemoveMassResCast(casterGUID, false)
+	end
 end
 
 -- -------------------------------------------------------------------
