@@ -49,7 +49,10 @@ local UnitFactionGroup = UnitFactionGroup
 local GetTime = GetTime
 local type = type
 local GetNamePlates = C_NamePlate.GetNamePlates
-local GetSpellInfo = C_Spell.GetSpellInfo
+local After = C_Timer.After
+
+---@class NamePlateFrame
+---@field unitToken string
 
 -- -------------------------------------------------------------------
 -- Internal state
@@ -389,6 +392,35 @@ local function RemoveMassResCast(casterGUID, updateFastest)
 	return NormalizeCallbackTable(massResCasterInfo[casterGUID]), changedTargetInfo
 end
 
+-- Helper function to resolve inviterName a unitID for RESURRECT_REQUEST.
+local function UnitMatchesName(unitID, name)
+	if not unitID or not name then return end
+
+	local unitName, unitRealm = UnitName(unitID)
+	if not unitName then return end
+
+	if name == unitName then
+		return true
+	end
+
+	if unitRealm and unitRealm ~= "" and name == unitName .. "-" .. unitRealm then
+		return true
+	end
+end
+
+local function FinishResCast(casterGUID, targetGUID)
+	local casterInfo = resCasterInfo[casterGUID]
+	if not casterInfo then return end
+	if casterInfo.targetGUID ~= targetGUID then return end
+
+	local finishedCasterInfo = resCasterInfo[casterGUID]
+	local finishedTargetInfo = resTargetInfo[targetGUID]
+
+	lib.callbacks:Fire("ResCast_Finished", casterGUID, targetGUID, NormalizeCallbackTable(finishedCasterInfo), NormalizeCallbackTable(finishedTargetInfo))
+
+	RemoveSingleResCast(casterGUID, targetGUID, false, false)
+end
+
 -- -------------------------------------------------------------------
 -- Event handlers
 -- -------------------------------------------------------------------
@@ -544,12 +576,67 @@ function lib:INCOMING_RESURRECT_CHANGED(_, targetID)
 	end
 end
 
--- The player has received a resurrection request.
+-- The player has received a resurrection request from a "Good Samaritan" who isn't in the player's group.
 function lib:RESURRECT_REQUEST(_, inviterName)
-	PLAYER_GUID = PLAYER_GUID or UnitGUID("player")
-	-- We can't track if we're in any instance or in combat, exit early because we cannot scan nameplates.
 	if IsInInstance() then return end
 	if InCombatLockdown() or UnitAffectingCombat("player") then return end
+
+	for _, nameplate in pairs(GetNamePlates()) do
+		local unitID = nameplate.unitToken
+
+		if UnitMatchesName(unitID, inviterName) then
+			local casterGUID = UnitGUID(unitID)
+			if not casterGUID then return end
+
+			local spellName, _, textureID, startTimeMs, endTimeMs, _, castGUID, _, spellID = UnitCastingInfo(unitID)
+			if not spellName or not spellID then return end
+			if not SINGLE_TARGET_RES_SPELLS[spellID] then return end
+
+			local castTime = (endTimeMs and startTimeMs) and ((endTimeMs - startTimeMs) / 1000) or 0
+			local endTime = endTimeMs and (endTimeMs / 1000) or GetTime()
+			local targetGUID = PLAYER_GUID
+
+			resCasterInfo[casterGUID] = resCasterInfo[casterGUID] or {}
+			resCasterInfo[casterGUID].castGUID = castGUID
+			resCasterInfo[casterGUID].casterGUID = casterGUID
+			resCasterInfo[casterGUID].castTime = castTime
+			resCasterInfo[casterGUID].spellID = spellID
+			resCasterInfo[casterGUID].targetGUID = targetGUID
+			resCasterInfo[casterGUID].textureID = textureID
+			resCasterInfo[casterGUID].endTime = endTime
+
+			resTargetInfo[targetGUID] = resTargetInfo[targetGUID] or {}
+			resTargetInfo[targetGUID].targetGUID = targetGUID
+			resTargetInfo[targetGUID][casterGUID] = resTargetInfo[targetGUID][casterGUID] or {}
+			resTargetInfo[targetGUID][casterGUID].castGUID = castGUID
+			resTargetInfo[targetGUID][casterGUID].casterGUID = casterGUID
+			resTargetInfo[targetGUID][casterGUID].castTime = castTime
+			resTargetInfo[targetGUID][casterGUID].spellID = spellID
+			resTargetInfo[targetGUID][casterGUID].targetGUID = targetGUID
+			resTargetInfo[targetGUID][casterGUID].textureID = textureID
+			resTargetInfo[targetGUID][casterGUID].endTime = endTime
+
+			local targetInfo = UpdateFastestCasterGUID(targetGUID)
+
+			lib.callbacks:Fire("ResCast_Started", resCasterInfo[casterGUID], resTargetInfo[targetGUID])
+
+			if targetInfo then
+				lib.callbacks:Fire("FastestResChanged", targetInfo)
+			end
+
+			local delay = endTime - GetTime()
+
+			if delay <= 0 then
+				FinishResCast(casterGUID, targetGUID)
+			else
+				After(delay, function()
+					FinishResCast(casterGUID, targetGUID)
+				end)
+			end
+
+			return
+		end
+	end
 end
 
 -- A resurrection cast has ended, either stoppped, failed, or interrupted. Clear the relevant tables and fire the callback.
