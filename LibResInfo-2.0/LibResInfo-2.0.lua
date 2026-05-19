@@ -15,9 +15,8 @@ assert(LibStub, MAJOR .. " requires LibStub")
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end
 
-local CallbackHandler = LibStub("CallbackHandler-1.0")
-
-lib.callbacks = lib.callbacks or CallbackHandler:New(lib)
+---@diagnostic disable-next-line: param-type-mismatch
+lib.callbacks = lib.callbacks or LibStub("CallbackHandler-1.0"):New(lib, nil, nil, false) -- Install RegisterCallback, UnregisterCallback, but do NOT install UnregisterAllCallbacks.
 
 lib.embeds = lib.embeds or {}
 
@@ -57,9 +56,24 @@ local UnitExists = UnitExists
 local UnitIsDeadOrGhost = UnitIsDeadOrGhost
 local InCombatLockdown = InCombatLockdown
 local UnitAffectingCombat = UnitAffectingCombat
+local ForEachAura = AuraUtil.ForEachAura
+local GetSelfResurrectOptions = C_DeathInfo.GetSelfResurrectOptions
 
 ---@class NamePlateFrame
 ---@field unitToken string
+
+---@class SelfResurrectOption
+---@field spellID? integer
+---@field itemID? integer
+---@field auraInstanceID? integer
+---@field expirationTime? number
+
+---@class SelfResOptionInfo
+---@field unitGUID string
+---@field spellID? integer
+---@field itemID? integer
+---@field auraInstanceID? integer
+---@field expirationTime? number
 
 -- -------------------------------------------------------------------
 -- Internal state
@@ -76,6 +90,9 @@ local resTargetInfo = {}
 
 -- Target GUIDs whose resurrection cast has finished, but whose alive state has not yet been observed.
 local ressedTargetGUIDs = {}
+
+-- Self-resurrection options by unit GUID and option key.
+local selfResInfo = {}
 
 -- -------------------------------------------------------------------
 -- Spell tables
@@ -152,12 +169,22 @@ local MASS_RES_SPELLS = {
 	[361178]	= true,		-- Mass Return
 }
 
+local SELF_RES_AURAS = {
+	[20707]		= true,		-- Soulstone / Soulstone Resurrection
+	[20608]		= true,		-- Reincarnation
+	[23683]		= true,		-- Twisting Nether (core self-res spell)
+	[23700]		= true,		-- Twisting Nether (Darkmoon Card proc effect)
+	[23701]		= true,		-- Twisting Nether (Darkmoon Card passive aura)
+	[148623]	= true,		-- Cauterizing Core
+	[280007]	= true,		-- Drust Soulcatcher
+}
+
 -- -------------------------------------------------------------------
 -- Constants
 -- -------------------------------------------------------------------
 
 local RES_PENDING_TIMEOUT = 60
-local PLAYER_GUID, PLAYER_NAME, PLAYER_REALM
+local PLAYER_GUID
 local isMists = WOW_PROJECT_ID == WOW_PROJECT_MISTS_CLASSIC
 local isMainline = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
 
@@ -175,6 +202,7 @@ local events = {
 	["UNIT_SPELLCAST_SENT"]			= true,
 	["PLAYER_ALIVE"]				= true,
 	["PLAYER_UNGHOST"]				= true,
+	["UNIT_AURA"]					= true,
 }
 
 -- -------------------------------------------------------------------
@@ -502,6 +530,130 @@ local function RemoveExpiredUnknownTargetInfo()
 	return removed
 end
 
+local function GetSelfResOptionKey(optionInfo)
+	if optionInfo.spellID then
+		return "spell:" .. optionInfo.spellID
+	elseif optionInfo.itemID then
+		return "item:" .. optionInfo.itemID
+	elseif optionInfo.auraInstanceID then
+		return "aura:" .. optionInfo.auraInstanceID
+	end
+end
+
+local function AddSelfResOption(unitGUID, optionInfo)
+	if not unitGUID or not optionInfo then return end
+
+	local optionKey = GetSelfResOptionKey(optionInfo)
+	if not optionKey then return end
+
+	selfResInfo[unitGUID] = selfResInfo[unitGUID] or {}
+
+	if not selfResInfo[unitGUID][optionKey] then
+		selfResInfo[unitGUID][optionKey] = optionInfo
+		lib.callbacks:Fire("UnitSelfRes_Available", unitGUID, optionInfo)
+	else
+		selfResInfo[unitGUID][optionKey] = optionInfo
+	end
+
+	return optionKey
+end
+
+local function RemoveSelfResOption(unitGUID, optionKey)
+	if not unitGUID or not optionKey then return end
+	if not selfResInfo[unitGUID] then return end
+
+	local consumedOptionInfo = selfResInfo[unitGUID][optionKey]
+	if not consumedOptionInfo then return end
+
+	selfResInfo[unitGUID][optionKey] = nil
+
+	local remainingInfo = next(selfResInfo[unitGUID]) and selfResInfo[unitGUID] or nil
+
+	if not remainingInfo then
+		selfResInfo[unitGUID] = nil
+	end
+
+	lib.callbacks:Fire("UnitSelfRes_Consumed", unitGUID, consumedOptionInfo, remainingInfo)
+end
+
+local function UpdatePlayerSelfResOptions()
+	if not GetSelfResurrectOptions then return end
+
+	local unitGUID = PLAYER_GUID or UnitGUID("player")
+	if not unitGUID then return end
+
+	local seen = {}
+	---@type SelfResurrectOption[]?
+	local options = GetSelfResurrectOptions()
+
+	if options then
+		for _, option in pairs(options) do
+			---@type SelfResOptionInfo
+			local optionInfo = {
+				unitGUID = unitGUID,
+			}
+
+			if option.spellID then optionInfo.spellID = option.spellID end
+			if option.itemID then optionInfo.itemID = option.itemID end
+			if option.auraInstanceID then optionInfo.auraInstanceID = option.auraInstanceID end
+			if option.expirationTime then optionInfo.expirationTime = option.expirationTime end
+
+			local optionKey = GetSelfResOptionKey(optionInfo)
+
+			if optionKey then
+				seen[optionKey] = true
+				AddSelfResOption(unitGUID, optionInfo)
+			end
+		end
+	end
+
+	if selfResInfo[unitGUID] then
+		for optionKey in pairs(selfResInfo[unitGUID]) do
+			if not seen[optionKey] then
+				RemoveSelfResOption(unitGUID, optionKey)
+			end
+		end
+	end
+end
+
+local function UpdateUnitSelfResAuras(unitID)
+	if not unitID then return end
+
+	local unitGUID = UnitGUID(unitID)
+	if not unitGUID then return end
+
+	local seen = {}
+
+	ForEachAura(unitID, "HELPFUL", nil, function(aura)
+		local spellID = aura.spellId
+
+		if spellID and SELF_RES_AURAS[spellID] then
+			local optionInfo = {
+				unitGUID = unitGUID,
+				spellID = spellID,
+			}
+
+			if aura.auraInstanceID then optionInfo.auraInstanceID = aura.auraInstanceID end
+			if aura.expirationTime then optionInfo.expirationTime = aura.expirationTime end
+
+			local optionKey = GetSelfResOptionKey(optionInfo)
+
+			if optionKey then
+				seen[optionKey] = true
+				AddSelfResOption(unitGUID, optionInfo)
+			end
+		end
+	end, true)
+
+	if selfResInfo[unitGUID] then
+		for optionKey, optionInfo in pairs(selfResInfo[unitGUID]) do
+			if optionInfo.auraInstanceID and not seen[optionKey] then
+				RemoveSelfResOption(unitGUID, optionKey)
+			end
+		end
+	end
+end
+
 -- -------------------------------------------------------------------
 -- Event handlers
 -- -------------------------------------------------------------------
@@ -509,13 +661,13 @@ end
 -- Assign values to constants and register events.
 function lib:PLAYER_LOGIN()
 	PLAYER_GUID = PLAYER_GUID or UnitGUID("player")
-	PLAYER_NAME, PLAYER_REALM = PLAYER_NAME, PLAYER_REALM or UnitName("player")
 
 	-- Clear all states. This is important for handling logouts/reloads while casts are active.
 	wipe(resCasterInfo)
 	wipe(massResCasterInfo)
 	wipe(resTargetInfo)
 	wipe(ressedTargetGUIDs)
+	wipe(selfResInfo)
 
 	for k, v in pairs(events) do
 		if v then
@@ -533,6 +685,8 @@ function lib:PLAYER_LOGIN()
 	lib.UNIT_SPELLCAST_INTERRUPTED		= lib.UNIT_SPELLCAST_STOP
 	lib.PLAYER_ALIVE					= lib.UNIT_HEALTH
 	lib.PLAYER_UNGHOST					= lib.UNIT_HEALTH
+
+	UpdatePlayerSelfResOptions()
 end
 
 -- Update the player's GUID if they changed factions.
@@ -848,6 +1002,14 @@ function lib:UNIT_HEALTH(_, unitID)
 	RemoveExpiredUnknownTargetInfo()
 end
 
+function lib:UNIT_AURA(_, unitID)
+	if unitID == "player" then
+		UpdatePlayerSelfResOptions()
+	else
+		UpdateUnitSelfResAuras(unitID)
+	end
+end
+
 -- -------------------------------------------------------------------
 -- Embed mixins into target addon objects
 -- -------------------------------------------------------------------
@@ -855,7 +1017,6 @@ end
 local mixins = {
 	"RegisterCallback",
 	"UnregisterCallback",
-	"UnregisterAllCallbacks",
 }
 
 function lib:Embed(target)
