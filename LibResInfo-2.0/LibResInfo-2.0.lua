@@ -132,7 +132,7 @@ local InCombatLockdown = InCombatLockdown
 
 local GetNamePlates = C_NamePlate.GetNamePlates
 local After = C_Timer.After
-local ForEachAura = AuraUtil.ForEachAura
+local GetUnitAuraBySpellID = C_UnitAuras.GetUnitAuraBySpellID
 local GetSelfResurrectOptions = C_DeathInfo.GetSelfResurrectOptions
 
 local wipe = table.wipe
@@ -785,10 +785,10 @@ local function UpdateUnitSelfResAuras(unitID)
 
 	local seen = {}
 
-	ForEachAura(unitID, "HELPFUL", nil, function(aura)
-		local spellID = aura.spellId
+	for spellID in pairs(SELF_RES_AURAS) do
+		local aura = GetUnitAuraBySpellID(unitID, spellID)
 
-		if spellID and SELF_RES_AURAS[spellID] then
+		if aura then
 			---@type SelfResOptionInfo
 			local optionInfo = {
 				unitGUID = unitGUID,
@@ -805,7 +805,7 @@ local function UpdateUnitSelfResAuras(unitID)
 				AddSelfResOption(unitGUID, optionInfo)
 			end
 		end
-	end, true)
+	end
 
 	if selfResInfo[unitGUID] then
 		for optionKey, optionInfo in pairs(selfResInfo[unitGUID]) do

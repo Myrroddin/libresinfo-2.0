@@ -16,7 +16,7 @@
 ## X-Project-Revision: @project-revision@
 
 ## Author: Paul Vandersypen
-## X-License: Copyrigbht © 2026 Paul Vandersypen. MIT License (https://opensource.org/licenses/MIT)
+## X-License: Copyright © 2026 Paul Vandersypen. MIT License (https://opensource.org/licenses/MIT)
 ## Category: Libraries
 ## Category-deDE: Bibliotheken
 ## Category-esES: Bibliotecas
