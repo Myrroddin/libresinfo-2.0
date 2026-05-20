@@ -1,0 +1,18 @@
+{
+  "ignore": [
+    "LibStub/",
+    "CallbackHandler-1.0/"
+  ],
+
+  "flavors": [
+    "classic_era",
+    "classic",
+    "retail"
+  ],
+
+  "diagnostics": {
+    "enable": [
+      "need-check-nil"
+    ]
+  }
+}

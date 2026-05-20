@@ -20,11 +20,70 @@ Core rules:
 local MAJOR, MINOR = "LibResInfo-2.0", 1
 assert(LibStub, MAJOR .. " requires LibStub")
 
+---@class LibResInfo20: table
+
 local lib = LibStub:NewLibrary(MAJOR, MINOR)
 if not lib then return end
 
+---@cast lib LibResInfo20
+
+-- -------------------------------------------------------------------
+-- LuaLS / WoWLS annotations
+-- -------------------------------------------------------------------
+
+---@class CallbackHandlerRegistry
+---@field RegisterCallback fun(self: table, eventName: LibResInfoCallback, method?: string|function)
+---@field UnregisterCallback fun(self: table, eventName: LibResInfoCallback)
+---@field UnregisterAllCallbacks fun(self: CallbackHandlerRegistry, target: table)
+
+---@class NamePlateFrame
+---@field unitToken string
+
+---@alias ResType "SINGLE"|"MASS"
+
+---@alias LibResInfoCallback
+---| "ResCast_Started"
+---| "ResCast_Finished"
+---| "ResCast_Stopped"
+---| "MassResCast_Started"
+---| "MassResCast_Finished"
+---| "MassResCast_Stopped"
+---| "FastestRes_Changed"
+---| "ResTargetGUID_Resolved"
+---| "ResTargetGUID_IsAlive"
+---| "UnitSelfRes_Available"
+---| "UnitSelfRes_Consumed"
+
+---@class ResCastInfo
+---@field castGUID? string
+---@field casterGUID string
+---@field castTime? number
+---@field spellID integer
+---@field targetGUID? string
+---@field textureID? integer
+---@field endTime? number
+
+---@class ResTargetInfo
+---@field targetGUID string
+---@field fastestCasterGUID? string
+---@field fastestResType? ResType
+-- Additional caster tables are stored dynamically, keyed by caster GUID.
+
+---@class SelfResurrectOption
+---@field spellID? integer
+---@field itemID? integer
+---@field auraInstanceID? integer
+---@field expirationTime? number
+
+---@class SelfResOptionInfo
+---@field unitGUID string
+---@field spellID? integer
+---@field itemID? integer
+---@field auraInstanceID? integer
+---@field expirationTime? number
+
 ---@type CallbackHandlerRegistry
-lib.callbacks = lib.callbacks or LibStub("CallbackHandler-1.0"):New(lib,
+lib.callbacks = lib.callbacks or LibStub("CallbackHandler-1.0"):New(lib --[[@as table]],
 	"RegisterCallback",
 	"UnregisterCallback",
 	"UnregisterAllResInfoCallbacks"
@@ -80,46 +139,6 @@ local wipe = table.wipe
 local pairs = pairs
 local next = next
 local type = type
-
--- -------------------------------------------------------------------
--- Types
--- -------------------------------------------------------------------
-
----@class CallbackHandlerRegistry
----@field RegisterCallback function
----@field UnregisterCallback function
----@field UnregisterAllCallbacks function
-
----@class NamePlateFrame
----@field unitToken string
-
----@class ResCastInfo
----@field castGUID? string
----@field casterGUID string
----@field castTime? number
----@field spellID integer
----@field targetGUID? string
----@field textureID? integer
----@field endTime? number
-
----@class ResTargetInfo
----@field targetGUID string
----@field fastestCasterGUID? string
----@field fastestResType? "SINGLE"|"MASS"
--- Additional caster tables are stored dynamically, keyed by caster GUID.
-
----@class SelfResurrectOption
----@field spellID? integer
----@field itemID? integer
----@field auraInstanceID? integer
----@field expirationTime? number
-
----@class SelfResOptionInfo
----@field unitGUID string
----@field spellID? integer
----@field itemID? integer
----@field auraInstanceID? integer
----@field expirationTime? number
 
 -- -------------------------------------------------------------------
 -- Constants
@@ -1143,6 +1162,9 @@ end
 -- Public APIs
 -- -------------------------------------------------------------------
 
+---@param unit string unitID, GUID, unit name, or name-realm
+---@return string|false casterGUID
+---@return ResType|nil resType
 function lib:GetFastestCasterForUnit(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
@@ -1168,12 +1190,17 @@ function lib:GetFastestCasterForUnit(unit)
 	return false, nil
 end
 
+---@param unit string unitID, GUID, unit name, or name-realm
+---@return boolean isBeingResurrected
 function lib:IsUnitBeingResurrected(unit)
 	local casterGUID = self:GetFastestCasterForUnit(unit)
 
 	return casterGUID ~= false
 end
 
+---@param unit string unitID, GUID, unit name, or name-realm
+---@return boolean canSelfRes
+---@return SelfResOptionInfo|table|nil optionInfo
 function lib:UnitCanSelfResurrect(unit)
 	local unitGUID = ResolvePublicUnitArg(unit)
 	if not unitGUID then
@@ -1208,6 +1235,10 @@ function lib:UnitCanSelfResurrect(unit)
 	return true, firstOption
 end
 
+---@param unit string unitID, GUID, unit name, or name-realm
+---@return number|false endTime Absolute cast end time, comparable to GetTime()
+---@return string|nil targetGUID
+---@return ResType|nil resType
 function lib:GetResurrectionCastInfo(unit)
 	local casterGUID = ResolvePublicUnitArg(unit)
 	if not casterGUID then
@@ -1227,6 +1258,8 @@ function lib:GetResurrectionCastInfo(unit)
 	return false, nil, nil
 end
 
+---@param unit string unitID, GUID, unit name, or name-realm
+---@return ResCastInfo|nil casterInfo
 function lib:GetCasterInfo(unit)
 	local casterGUID = ResolvePublicUnitArg(unit)
 	if not casterGUID then
@@ -1236,6 +1269,8 @@ function lib:GetCasterInfo(unit)
 	return resCasterInfo[casterGUID] or massResCasterInfo[casterGUID]
 end
 
+---@param unit string unitID, GUID, unit name, or name-realm
+---@return ResTargetInfo|nil targetInfo
 function lib:GetTargetInfo(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
@@ -1245,6 +1280,8 @@ function lib:GetTargetInfo(unit)
 	return resTargetInfo[targetGUID]
 end
 
+---@param unit string unitID, GUID, unit name, or name-realm
+---@return table<string, ResType>|nil casters
 function lib:GetAllCastersForUnit(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
