@@ -31,6 +31,18 @@ The library tracks:
 ## Callback Registration
 
 LibResInfo-2.0 embeds CallbackHandler-1.0 methods directly onto the addon object.
+CallbackHandler passes the callback name as the first argument to callback handlers. The callback argument tables below begin after the callback name argument.
+
+Example
+
+Example
+
+```lua
+function MyAddon:ResCast_Started(callbackName, casterGUID, targetGUID, casterInfo, targetInfo)
+    print(callbackName)
+    --> "ResCast_Started"
+end
+```
 
 ```lua
 local MyAddon = LibStub("AceAddon-3.0"):NewAddon("MyAddon", "LibResInfo-2.0")
@@ -144,7 +156,7 @@ Arguments
 Returns
 
 | Return     | Type            | Description                                                 |
-|------------|-------------------------------------------------------------------------------|
+|------------|-----------------|-------------------------------------------------------------|
 | endTime    | number or false | Absolute cast end time in seconds comparable to `GetTime()` |
 | targetGUID | string or nil   | Target GUID for single-target res casts, otherwise `nil`    |
 | resType    | string or nil   | `"SINGLE"` \| `"MASS"` \| `nil`                             |
@@ -490,4 +502,4 @@ Supported values:
 - unit name
 - name-realm
 
-Invalid values raise Lua errors.
+Invalid argument types, empty strings, and `"UNKNOWN"` raise Lua errors. Valid but unresolved unit names return the API's normal "not found" result.

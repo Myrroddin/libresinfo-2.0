@@ -6,9 +6,9 @@ CLEU-free resurrection tracking library.
 Tracks:
 - single-target resurrection casts
 - mass resurrection casts
-- external resurrection requests received by the player
 - completed resurrection targets becoming alive
 - self-resurrection options
+- external resurrection requests received by the player
 
 Core rules:
 - Caster identity must be a real GUID or the event is ignored.
@@ -106,6 +106,7 @@ local type = type
 ---@field targetGUID string
 ---@field fastestCasterGUID? string
 ---@field fastestResType? "SINGLE"|"MASS"
+-- Additional caster tables are stored dynamically, keyed by caster GUID.
 
 ---@class SelfResurrectOption
 ---@field spellID? integer
@@ -391,6 +392,22 @@ local function UpdateAllFastestCasterGUIDs()
 	return changedTargetInfo
 end
 
+local function GetFastestMassResCasterGUID()
+	local fastestCasterGUID
+	local fastestEndTime
+
+	for casterGUID, casterInfo in pairs(massResCasterInfo) do
+		if type(casterInfo) == "table" and casterInfo.endTime then
+			if not fastestEndTime or casterInfo.endTime < fastestEndTime then
+				fastestCasterGUID = casterGUID
+				fastestEndTime = casterInfo.endTime
+			end
+		end
+	end
+
+	return fastestCasterGUID
+end
+
 local function IsUnitGUID(value)
 	return type(value) == "string" and value:find("^%a+%-%d") ~= nil
 end
@@ -537,6 +554,8 @@ local function RemoveSingleResCast(casterGUID, targetGUID, updateFastest, remove
 
 	targetGUID = targetGUID or UNKNOWN_TARGET_GUID
 
+	local removedCasterInfo = resCasterInfo[casterGUID]
+
 	resCasterInfo[casterGUID] = nil
 
 	if resTargetInfo[targetGUID] then
@@ -562,11 +581,13 @@ local function RemoveSingleResCast(casterGUID, targetGUID, updateFastest, remove
 		resTargetInfo[targetGUID] = nil
 	end
 
-	return NormalizeCallbackTable(resCasterInfo[casterGUID]), NormalizeCallbackTable(targetInfo), changedTargetInfo
+	return NormalizeCallbackTable(removedCasterInfo), NormalizeCallbackTable(targetInfo), changedTargetInfo
 end
 
 local function RemoveMassResCast(casterGUID, updateFastest)
 	if not casterGUID then return end
+
+	local removedCasterInfo = massResCasterInfo[casterGUID]
 
 	massResCasterInfo[casterGUID] = nil
 
@@ -575,7 +596,7 @@ local function RemoveMassResCast(casterGUID, updateFastest)
 		changedTargetInfo = UpdateAllFastestCasterGUIDs()
 	end
 
-	return NormalizeCallbackTable(massResCasterInfo[casterGUID]), changedTargetInfo
+	return NormalizeCallbackTable(removedCasterInfo), changedTargetInfo
 end
 
 local function RemoveTargetResInfo(targetGUID)
@@ -1137,7 +1158,9 @@ function lib:GetFastestCasterForUnit(unit)
 	local unitID = UnitTokenFromGUID(targetGUID)
 
 	if unitID and UnitIsDeadOrGhost(unitID) then
-		for casterGUID in pairs(massResCasterInfo) do
+		local casterGUID = GetFastestMassResCasterGUID()
+
+		if casterGUID then
 			return casterGUID, "MASS"
 		end
 	end
