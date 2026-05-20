@@ -1,67 +1,128 @@
 # LibResInfo-2.0
 
-LibResInfo-2.0 is a lightweight library that provides information about resurrection activity for units in your group
+LibResInfo-2.0 is a CLEU-free resurrection tracking library for World of Warcraft addons.
 
-It tracks when a resurrection is started, becomes pending, succeeds, and expires.
+The library tracks:
+
+- single-target resurrection casts
+- mass resurrection casts
+- resurrection targets becoming alive
+- self-resurrection availability
+- fastest resurrection resolution per target
+
+Supported clients:
+
+- Classic Era
+- TBC Classic
+- Wrath Classic
+- Mists Classic
+- Retail
 
 ---
 
-## Quick Example
+## Features
+
+- No COMBAT_LOG_EVENT_UNFILTERED dependency
+- GUID-first tracking
+- Fastest resurrection detection
+- Multiple simultaneous resurrection casters per target
+- Self-resurrection tracking
+- CallbackHandler-1.0 support
+- Ace3-style embedding
+
+---
+
+## Installation
+
+### .pkgmeta
+
+LibResInfo-2.0 should embed the child folder:
+
+```yaml
+externals:
+  Libs/LibResInfo-2.0:
+    url: https://github.com/Myrroddin/libresinfo-2.0/trunk/LibResInfo-2.0
+```
+
+### TOC
+
+```toc
+## OptionalDeps: LibStub, CallbackHandler-1.0, LibResInfo-2.0
+
+LibResInfo-2.0\lib.xml
+```
+
+---
+
+## Basic Example
 
 ```lua
 local MyAddon = LibStub("AceAddon-3.0"):NewAddon("MyAddon", "LibResInfo-2.0")
 
 function MyAddon:OnEnable()
-    self:RegisterCallback("LRI2_UnitResPending")
+    self:RegisterCallback("ResCast_Started")
+    self:RegisterCallback("ResTargetGUID_IsAlive")
 end
 
-function MyAddon:LRI2_UnitResPending(callback, info)
-    if info.targetGUID == UnitGUID("player") then
-        print("You can now accept the resurrection.")
-    end
+function MyAddon:ResCast_Started(_, casterGUID, targetGUID)
+    print(casterGUID, "started resurrecting", targetGUID)
+end
+
+function MyAddon:ResTargetGUID_IsAlive(_, targetGUID)
+    print(targetGUID, "is now alive")
 end
 ```
 
 ---
 
-## Basic Usage
+## Public APIs
 
-```lua
-local info = MyAddon:GetIncomingResInfo("player")
+LibResInfo-2.0 embeds the following APIs directly onto the addon object:
 
-if info then
-    print(info.spellID)
-end
-```
+- `GetFastestCasterForUnit`
+- `GetResurrectionCastInfo`
+- `GetCasterInfo`
+- `GetTargetInfo`
+- `GetAllCastersForUnit`
+- `IsUnitBeingResurrected`
+- `UnitCanSelfResurrect`
 
 ---
 
 ## Callbacks
 
-The lib provides CallbackHandler-1.0 methods directly on the addon object.
-These only affect LibResInfo-2.0 callbacks.
-
-Callbacks fire per unit and include an info table describing the resurrection state.
+LibResInfo-2.0 embeds CallbackHandler-1.0 methods directly onto the addon object.
 
 ```lua
-MyAddon:RegisterCallback("LRI2_UnitResPending")
-MyAddon:UnregisterCallback("LRI2_UnitResStarted")
-MyAddon:UnregisterAllCallbacks()
+MyAddon:RegisterCallback("ResCast_Started")
+MyAddon:UnregisterCallback("ResCast_Started")
+MyAddon:UnregisterAllResInfoCallbacks()
 ```
 
 Available callbacks:
 
-- `LRI2_UnitResStarted`
-- `LRI2_UnitResPending`
-- `LRI2_UnitResSuccess`
-- `LRI2_UnitResExpired`
+- `ResCast_Started`
+- `ResCast_Stopped`
+- `ResCast_Finished`
+- `MassResCast_Started`
+- `MassResCast_Stopped`
+- `MassResCast_Finished`
+- `FastestRes_Changed`
+- `ResTargetGUID_Resolved`
+- `ResTargetGUID_IsAlive`
+- `UnitSelfRes_Available`
+- `UnitSelfRes_Consumed`
+
+---
+
+## Notes
+
+- `targetGUID` may temporarily be `"UNKNOWN"` if Blizzard does not expose enough information to resolve the target immediately.
+- Mass resurrection spells do not expose target GUIDs.
+- Callback info tables should be treated as read-only.
 
 ---
 
 ## Documentation
 
-Full API and callback documentation:
-
-[API.md](./API.md)
-
----
+See [API.md](./API.md) for complete API and callback documentation.
