@@ -24,7 +24,25 @@ The library tracks:
   - [GetTargetInfo(unit)](#gettargetinfounit)
   - [GetAllCastersForUnit(unit)](#getallcastersforunitunit)
 - [Callbacks](#callbacks)
+  - [ResCast_Started](#rescast_started)
+  - [ResCast_Stopped](#rescast_stopped)
+  - [ResCast_Finished](#rescast_finished)
+  - [MassResCast_Started](#massrescast_started)
+  - [MassResCast_Stopped](#massrescast_stopped)
+  - [MassResCast_Finished](#massrescast_finished)
+  - [FastestRes_Changed](#fastestres_changed)
+  - [ResTargetGUID_Resolved](#restargetguid_resolved)
+  - [ResTargetGUID_IsAlive](#restargetguid_isalive)
+  - [UnitSelfRes_Available](#unitselfres_available)
+  - [UnitSelfRes_Consumed](#unitselfres_consumed)
 - [Table Structures](#table-structures)
+  - [ResCastInfo](#rescastinfo)
+  - [ResTargetInfo](#restargetinfo)
+  - [SelfResOptionInfo](#selfresoptioninfo)
+- [Unknown Targets](#unknown-targets)
+- [Mass Resurrection](#mass-resurrection)
+- [Callback Tables](#callback-tables)
+- [API Validation](#api-validation)
 
 ---
 
@@ -467,7 +485,7 @@ Only populated fields are present.
 
 ---
 
-### Unknown Targets
+## Unknown Targets
 
 Single-target resurrection casts may temporarily use:
 
@@ -479,19 +497,19 @@ as the targetGUID until Blizzard exposes enough information to resolve the targe
 
 ---
 
-### Mass Resurrection
+## Mass Resurrection
 
 Mass resurrection casts do not expose target GUIDs.
 
 ---
 
-### Callback Tables
+## Callback Tables
 
 Callback info tables should be treated as read-only.
 
 ---
 
-### API Validation
+## API Validation
 
 Public APIs validate incoming unit arguments.
 
