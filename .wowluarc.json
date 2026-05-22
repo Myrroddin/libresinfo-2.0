@@ -1,14 +1,26 @@
 {
   "ignore": [
+    ".vscode/",
+    ".github/",
     "LibStub/",
-    "CallbackHandler-1.0/"
+    "CallbackHandler-1.0/",
+    "*.md",
+    "LICENSE"
   ],
+
+  "framexml": true,
 
   "flavors": [
     "classic_era",
     "classic",
     "retail"
   ],
+
+  "globals": {
+    "read": [
+      "LibStub"
+    ]
+  },
 
   "diagnostics": {
     "enable": [

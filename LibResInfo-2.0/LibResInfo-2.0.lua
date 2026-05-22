@@ -27,20 +27,9 @@ if not lib then return end
 
 ---@cast lib LibResInfo20
 
--- -------------------------------------------------------------------
--- LuaLS / WoWLS annotations
--- -------------------------------------------------------------------
-
----@class CallbackHandlerRegistry
----@field RegisterCallback fun(self: table, eventName: LibResInfoCallback, method?: string|function)
----@field UnregisterCallback fun(self: table, eventName: LibResInfoCallback)
----@field UnregisterAllCallbacks fun(self: CallbackHandlerRegistry, target: table)
-
----@class NamePlateFrame
----@field unitToken string
-
 ---@alias ResType "SINGLE"|"MASS"
 
+-- Callback names accepted by RegisterCallback and UnregisterCallback.
 ---@alias LibResInfoCallback
 ---| "ResCast_Started"
 ---| "ResCast_Finished"
@@ -53,6 +42,14 @@ if not lib then return end
 ---| "ResTargetGUID_IsAlive"
 ---| "UnitSelfRes_Available"
 ---| "UnitSelfRes_Consumed"
+
+---@class CallbackHandlerRegistry
+---@field RegisterCallback fun(self: table, eventName: LibResInfoCallback, method?: string|function)
+---@field UnregisterCallback fun(self: table, eventName: LibResInfoCallback)
+---@field UnregisterAllCallbacks fun(self: CallbackHandlerRegistry, target: table)
+
+---@class NamePlateFrame
+---@field unitToken string
 
 ---@class ResCastInfo
 ---@field castGUID? string
@@ -67,7 +64,6 @@ if not lib then return end
 ---@field targetGUID string
 ---@field fastestCasterGUID? string
 ---@field fastestResType? ResType
--- Additional caster tables are stored dynamically, keyed by caster GUID.
 
 ---@class SelfResurrectOption
 ---@field spellID? integer
@@ -156,18 +152,23 @@ local isMainline = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
 -- -------------------------------------------------------------------
 
 -- Active single-target resurrection casts, keyed by caster GUID.
+---@type table<string, ResCastInfo>
 local resCasterInfo = {}
 
 -- Active mass resurrection casts, keyed by caster GUID.
+---@type table<string, ResCastInfo>
 local massResCasterInfo = {}
 
 -- Active single-target resurrection casts, keyed by target GUID, then caster GUID.
+---@type table<string, ResTargetInfo>
 local resTargetInfo = {}
 
 -- Targets whose resurrection cast finished, but whose alive state has not yet been observed.
+---@type table<string, true>
 local ressedTargetGUIDs = {}
 
 -- Self-resurrection options, keyed by unit GUID, then option key.
+---@type table<string, table<string, SelfResOptionInfo>>
 local selfResInfo = {}
 
 -- -------------------------------------------------------------------
@@ -744,7 +745,7 @@ local function UpdatePlayerSelfResOptions()
 
 	local seen = {}
 
-	---@type SelfResurrectOption[]?
+	---@type SelfResurrectOption[]|nil
 	local options = GetSelfResurrectOptions()
 
 	if options then
@@ -1316,6 +1317,19 @@ end
 -- Embed mixins into target addon objects
 -- -------------------------------------------------------------------
 
+---@alias LibResInfoMixin
+---| "RegisterCallback"
+---| "UnregisterCallback"
+---| "UnregisterAllResInfoCallbacks"
+---| "GetFastestCasterForUnit"
+---| "IsUnitBeingResurrected"
+---| "UnitCanSelfResurrect"
+---| "GetResurrectionCastInfo"
+---| "GetCasterInfo"
+---| "GetTargetInfo"
+---| "GetAllCastersForUnit"
+
+---@type LibResInfoMixin[]
 local mixins = {
 	"RegisterCallback",
 	"UnregisterCallback",
@@ -1329,6 +1343,8 @@ local mixins = {
 	"GetAllCastersForUnit",
 }
 
+---@param target table
+---@return table
 function lib:Embed(target)
 	for _, methodName in pairs(mixins) do
 		target[methodName] = self[methodName]
