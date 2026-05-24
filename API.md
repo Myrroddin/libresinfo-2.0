@@ -53,8 +53,6 @@ CallbackHandler passes the callback name as the first argument to callback handl
 
 Example
 
-Example
-
 ```lua
 function MyAddon:ResCast_Started(callbackName, casterGUID, targetGUID, casterInfo, targetInfo)
     print(callbackName)
@@ -91,9 +89,9 @@ Returns the fastest active resurrection caster for a unit.
 
 Arguments
 
-| Name | Type   | Description                |
-|------|--------|----------------------------|
-| unit | string | unitID, GUID, or unit name |
+| Name | Type   | Description                            |
+|------|--------|----------------------------------------|
+| unit | string | unitID, GUID, unit name, or name-realm |
 
 Returns
 
@@ -116,9 +114,9 @@ Returns whether a unit is currently being resurrected.
 
 Arguments
 
-| Name | Type   | Description                |
-|---   |--------|----------------------------|
-| unit | string | unitID, GUID, or unit name |
+| Name | Type   | Description                            |
+|---   |--------|----------------------------------------|
+| unit | string | unitID, GUID, unit name, or name-realm |
 
 Returns
 
@@ -142,9 +140,9 @@ Returns whether a unit currently has one or more self-resurrection options avail
 
 Arguments
 
-| Name | Type   | Description                |
-|------|--------|----------------------------|
-| unit | string | unitID, GUID, or unit name |
+| Name | Type   | Description                            |
+|------|--------|----------------------------------------|
+| unit | string | unitID, GUID, unit name, or name-realm |
 
 Returns
 
@@ -167,9 +165,9 @@ Returns active resurrection cast information for a caster.
 
 Arguments
 
-| Name | Type   | Description                |
-|------|--------|----------------------------|
-| unit | string | unitID, GUID, or unit name |
+| Name | Type   | Description                            |
+|------|--------|----------------------------------------|
+| unit | string | unitID, GUID, unit name, or name-realm |
 
 Returns
 
@@ -193,9 +191,9 @@ Returns the active resurrection cast table for a caster.
 
 Arguments
 
-| Name | Type   | Description                |
-|------|--------|----------------------------|
-| unit | string | unitID, GUID, or unit name |
+| Name | Type   | Description                            |
+|------|--------|----------------------------------------|
+| unit | string | unitID, GUID, unit name, or name-realm |
 
 Returns
 
@@ -217,9 +215,9 @@ Returns the active resurrection target table for a target.
 
 Arguments
 
-| Name | Type   | Description                |
-|------|--------|----------------------------|
-| unit | string | unitID, GUID, or unit name |
+| Name | Type   | Description                            |
+|------|--------|----------------------------------------|
+| unit | string | unitID, GUID, unit name, or name-realm |
 
 Returns
 
@@ -241,9 +239,9 @@ Returns all active resurrection casters for a target.
 
 Arguments
 
-| Name | Type   | Description                |
-|------|--------|----------------------------|
-| unit | string | unitID, GUID, or unit name |
+| Name | Type   | Description                            |
+|------|--------|----------------------------------------|
+| unit | string | unitID, GUID, unit name, or name-realm |
 
 Returns
 
