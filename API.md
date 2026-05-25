@@ -286,6 +286,7 @@ Arguments
 Notes
 
 - `targetGUID` may temporarily be `"UNKNOWN"`.
+- When `targetGUID` is `"UNKNOWN"`, `targetInfo` contains only that caster's unresolved entry, not all unresolved casts.
 
 ---
 
@@ -308,6 +309,11 @@ Arguments
 | 3 | casterInfo | ResCastInfo or nil   |
 | 4 | targetInfo | ResTargetInfo or nil |
 
+Notes
+
+- `targetGUID` may be `"UNKNOWN"` if Blizzard never exposed the target before the cast stopped.
+- When `targetGUID` is `"UNKNOWN"`, `targetInfo` contains only that caster's unresolved entry.
+
 ---
 
 ### ResCast_Finished
@@ -322,6 +328,11 @@ Arguments
 | 2 | targetGUID | string        |
 | 3 | casterInfo | ResCastInfo   |
 | 4 | targetInfo | ResTargetInfo |
+
+Notes
+
+- `targetGUID` may be `"UNKNOWN"` if Blizzard never exposed the target before the cast finished.
+- `"UNKNOWN"` targets are not tracked for alive confirmation.
 
 ---
 
@@ -378,6 +389,8 @@ Arguments
 Notes
 
 - Fired only when the fastest result changes.
+- Never fired for `"UNKNOWN"` targets.
+- `targetGUID` is always a valid GUID.
 
 ---
 
@@ -394,6 +407,10 @@ Arguments
 | 3 | casterInfo | ResCastInfo   |
 | 4 | targetInfo | ResTargetInfo |
 
+Notes
+
+- `targetGUID` is always a valid GUID.
+
 ---
 
 ### ResTargetGUID_IsAlive
@@ -405,6 +422,11 @@ Arguments
 | # | Name       | Type   |
 |---|------------|--------|
 | 1 | targetGUID | string |
+
+Notes
+
+- `targetGUID` is always a valid GUID.
+- This callback never fires for `"UNKNOWN"` targets.
 
 ---
 
@@ -492,6 +514,15 @@ Single-target resurrection casts may temporarily use:
 ```
 
 as the targetGUID until Blizzard exposes enough information to resolve the target.
+
+`"UNKNOWN"` is a staging marker, not a real target identity. Multiple unresolved casts may exist at the same time, and they may not belong to the same actual target.
+
+Because of this:
+
+- `"UNKNOWN"` targets are not used for fastest-caster calculations.
+- `FastestRes_Changed` is never fired for `"UNKNOWN"` targets.
+- `ResTargetGUID_IsAlive` is never fired for `"UNKNOWN"` targets.
+- callback `targetInfo` for an `"UNKNOWN"` target contains only the caster's own unresolved entry.
 
 ---
 
