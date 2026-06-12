@@ -12,7 +12,10 @@
   "framexml": true,
 
   "flavors": [
-    "classic_era", "classic", "retail"],
+    "classic_era",
+    "classic",
+    "retail"
+  ],
 
   "globals": {
     "read": [

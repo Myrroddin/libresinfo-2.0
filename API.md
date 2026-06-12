@@ -16,25 +16,31 @@ The library tracks:
 
 - [Callback Registration](#callback-registration)
 - [Public APIs](#public-apis)
-  - [GetFastestCasterForUnit(unit)](#getfastestcasterforunitunit)
-  - [IsUnitBeingResurrected(unit)](#isunitbeingresurrectedunit)
-  - [UnitCanSelfResurrect(unit)](#unitcanselfresurrectunit)
-  - [GetResurrectionCastInfo(unit)](#getresurrectioncastinfounit)
-  - [GetCasterInfo(unit)](#getcasterinfounit)
-  - [GetTargetInfo(unit)](#gettargetinfounit)
-  - [GetAllCastersForUnit(unit)](#getallcastersforunitunit)
+  - [Unit-Specific APIs](#unit-specific-apis)
+    - [GetAllCastersForUnit(unit)](#getallcastersforunitunit)
+    - [GetCasterInfo(unit)](#getcasterinfounit)
+    - [GetResurrectionCastInfo(unit)](#getresurrectioncastinfounit)
+    - [GetTargetInfo(unit)](#gettargetinfounit)
+    - [IsUnitBeingResurrected(unit)](#isunitbeingresurrectedunit)
+    - [UnitCanSelfResurrect(unit)](#unitcanselfresurrectunit)
+  - [Mass Resurrection APIs](#mass-resurrection-apis)
+    - [IsMassResBeingCast()](#ismassresbeingcast)
 - [Callbacks](#callbacks)
-  - [ResCast_Started](#rescast_started)
-  - [ResCast_Stopped](#rescast_stopped)
-  - [ResCast_Finished](#rescast_finished)
-  - [MassResCast_Started](#massrescast_started)
-  - [MassResCast_Stopped](#massrescast_stopped)
-  - [MassResCast_Finished](#massrescast_finished)
-  - [FastestRes_Changed](#fastestres_changed)
-  - [ResTargetGUID_Resolved](#restargetguid_resolved)
-  - [ResTargetGUID_IsAlive](#restargetguid_isalive)
-  - [UnitSelfRes_Available](#unitselfres_available)
-  - [UnitSelfRes_Consumed](#unitselfres_consumed)
+  - [Single-Target Resurrection](#single-target-resurrection)
+    - [ResCast_Finished](#rescast_finished)
+    - [ResCast_Started](#rescast_started)
+    - [ResCast_Stopped](#rescast_stopped)
+    - [ResTargetGUID_IsAlive](#restargetguid_isalive)
+    - [ResTargetGUID_Resolved](#restargetguid_resolved)
+  - [Mass Resurrection](#mass-resurrection-callbacks)
+    - [MassResCast_Finished](#massrescast_finished)
+    - [MassResCast_Started](#massrescast_started)
+    - [MassResCast_Stopped](#massrescast_stopped)
+  - [Fastest Resurrection](#fastest-resurrection)
+    - [FastestRes_Changed](#fastestres_changed)
+  - [Self-Resurrection](#self-resurrection)
+    - [UnitSelfRes_Available](#unitselfres_available)
+    - [UnitSelfRes_Consumed](#unitselfres_consumed)
 - [Table Structures](#table-structures)
   - [ResCastInfo](#rescastinfo)
   - [ResTargetInfo](#restargetinfo)
@@ -54,27 +60,25 @@ CallbackHandler passes the callback name as the first argument to callback handl
 Example
 
 ```lua
-function MyAddon:ResCast_Started(callbackName, casterGUID, targetGUID, casterInfo, targetInfo)
-    print(callbackName)
-    --> "ResCast_Started"
-end
-```
-
-```lua
 local MyAddon = LibStub("AceAddon-3.0"):NewAddon("MyAddon", "LibResInfo-2.0")
-```
 
-Register callbacks normally:
+-- Register embedded callbacks:
+function MyAddon:OnEnable()
+    self:RegisterCallback("ResCast_Started")
+end
 
-```lua
-MyAddon:RegisterCallback("ResCast_Started")
-```
+-- Unregister embedded callbacks:
+function MyAddon:OnDisable()
+    self:UnregisterCallback("ResCast_Started")
+    self:UnregisterAllResInfoCallbacks()
+end
 
-Unregister callbacks normally:
-
-```lua
-MyAddon:UnregisterCallback("ResCast_Started")
-MyAddon:UnregisterAllResInfoCallbacks()
+-- Handle the ResCast_Started callback (the first explicit parameter is the callback name):
+function MyAddon:ResCast_Started(callbackName, casterGUID, targetGUID, casterInfo, targetInfo)
+    local casterName = UnitNameFromGUID(casterGUID)
+    local targetName = targetGUID == "UNKNOWN" and UNKNOWN or UnitNameFromGUID(targetGUID) -- UNKNOWN is a Blizzard global string which is automatically translated to "Unknown"
+    self:Print(casterName .. " is resurrecting " .. targetName)
+end
 ```
 
 ---
@@ -83,171 +87,25 @@ MyAddon:UnregisterAllResInfoCallbacks()
 
 ---
 
-### GetFastestCasterForUnit(unit)
-
-Returns the fastest active resurrection caster for a unit.
-
-Arguments
-
-| Name | Type   | Description                            |
-|------|--------|----------------------------------------|
-| unit | string | unitID, GUID, unit name, or name-realm |
-
-Returns
-
-| Return     | Type                          | Description         |
-|------------|-------------------------------|---------------------|
-| casterGUID | string or false               | Fastest caster GUID |
-| resType    | `"SINGLE"` \| `"MASS"` \| nil | Resurrection type   |
-
-Example
-
-```lua
-local casterGUID, resType = MyAddon:GetFastestCasterForUnit("player")
-```
+### Unit-Specific APIs
 
 ---
 
-### IsUnitBeingResurrected(unit)
-
-Returns whether a unit is currently being resurrected.
-
-Arguments
-
-| Name | Type   | Description                            |
-|---   |--------|----------------------------------------|
-| unit | string | unitID, GUID, unit name, or name-realm |
-
-Returns
-
-| Return             | Type    |
-|--------------------|---------|
-| isBeingResurrected | boolean |
-
-Example
-
-```lua
-if MyAddon:IsUnitBeingResurrected("player") then
-    print("Incoming resurrection")
-end
-```
-
----
-
-### UnitCanSelfResurrect(unit)
-
-Returns whether a unit currently has one or more self-resurrection options available.
-
-Arguments
-
-| Name | Type   | Description                            |
-|------|--------|----------------------------------------|
-| unit | string | unitID, GUID, unit name, or name-realm |
-
-Returns
-
-| Return     | Type                             | Description                                                                          |
-|------------|----------------------------------|--------------------------------------------------------------------------------------|
-| canSelfRes | boolean                          | Whether the unit has at least one self-resurrection option                           |
-| optionInfo | SelfResOptionInfo, table, or nil | A single SelfResOptionInfo table, multiple option tables keyed by option key, or nil |
-
-Example
-
-```lua
-local canSelfRes, optionInfo = MyAddon:UnitCanSelfResurrect("player")
-```
-
----
-
-### GetResurrectionCastInfo(unit)
-
-Returns active resurrection cast information for a caster.
-
-Arguments
-
-| Name | Type   | Description                            |
-|------|--------|----------------------------------------|
-| unit | string | unitID, GUID, unit name, or name-realm |
-
-Returns
-
-| Return     | Type            | Description                                                 |
-|------------|-----------------|-------------------------------------------------------------|
-| endTime    | number or false | Absolute cast end time in seconds comparable to `GetTime()` |
-| targetGUID | string or nil   | Target GUID for single-target res casts, otherwise `nil`    |
-| resType    | string or nil   | `"SINGLE"` \| `"MASS"` \| `nil`                             |
-
-Example
-
-```lua
-local endTime, targetGUID, resType = MyAddon:GetResurrectionCastInfo("raid1")
-```
-
----
-
-### GetCasterInfo(unit)
-
-Returns the active resurrection cast table for a caster.
-
-Arguments
-
-| Name | Type   | Description                            |
-|------|--------|----------------------------------------|
-| unit | string | unitID, GUID, unit name, or name-realm |
-
-Returns
-
-| Return     | Type               |
-|------------|--------------------|
-| casterInfo | ResCastInfo or nil |
-
-Example
-
-```lua
-local casterInfo = MyAddon:GetCasterInfo("raid1")
-```
-
----
-
-### GetTargetInfo(unit)
-
-Returns the active resurrection target table for a target.
-
-Arguments
-
-| Name | Type   | Description                            |
-|------|--------|----------------------------------------|
-| unit | string | unitID, GUID, unit name, or name-realm |
-
-Returns
-
-| Return     | Type                 |
-|------------|----------------------|
-| targetInfo | ResTargetInfo or nil |
-
-Example
-
-```lua
-local targetInfo = MyAddon:GetTargetInfo("player")
-```
-
----
-
-### GetAllCastersForUnit(unit)
+#### GetAllCastersForUnit(unit)
 
 Returns all active resurrection casters for a target.
 
 Arguments
 
-| Name | Type   | Description                            |
-|------|--------|----------------------------------------|
-| unit | string | unitID, GUID, unit name, or name-realm |
+| Name | Type     | Description                            |
+|------|----------|----------------------------------------|
+| unit | `string` | unitID, GUID, unit name, or name-realm |
 
 Returns
 
-| Return  | Type         |
-|---------|--------------|
-| casters | table or nil |
+| Return  | Type             | Description                                      |
+|---------|------------------|--------------------------------------------------|
+| casters | `table` or `nil` | Active resurrection casters keyed by caster GUID |
 
 Example
 
@@ -266,22 +124,196 @@ Example table:
 
 ---
 
+#### GetCasterInfo(unit)
+
+Returns the full active `ResCastInfo` table for a caster.
+
+Arguments
+
+| Name | Type     | Description                            |
+|------|----------|----------------------------------------|
+| unit | `string` | unitID, GUID, unit name, or name-realm |
+
+Returns
+
+| Return     | Type                   | Description                           |
+|------------|------------------------|---------------------------------------|
+| casterInfo | `ResCastInfo` or `nil` | Full active cast table for the caster |
+
+Example
+
+```lua
+local casterInfo = MyAddon:GetCasterInfo("raid1")
+```
+
+---
+
+#### GetResurrectionCastInfo(unit)
+
+Returns the compact cast status for a caster.
+
+Arguments
+
+| Name | Type     | Description                            |
+|------|----------|----------------------------------------|
+| unit | `string` | unitID, GUID, unit name, or name-realm |
+
+Returns
+
+| Return     | Type                | Description                                                 |
+|------------|---------------------|-------------------------------------------------------------|
+| endTime    | `number` or `false` | Absolute cast end time in seconds comparable to `GetTime()` |
+| targetGUID | `string` or `nil`   | Target GUID for single-target casts, otherwise `nil`        |
+| resType    | `string` or `nil`   | `"SINGLE"` \| `"MASS"` \| `nil`                             |
+
+Example
+
+```lua
+local endTime, targetGUID, resType = MyAddon:GetResurrectionCastInfo("raid1")
+```
+
+---
+
+#### GetTargetInfo(unit)
+
+Returns the active resurrection target table for a target.
+
+Arguments
+
+| Name | Type     | Description                            |
+|------|----------|----------------------------------------|
+| unit | `string` | unitID, GUID, unit name, or name-realm |
+
+Returns
+
+| Return     | Type                     | Description                              |
+|------------|--------------------------|------------------------------------------|
+| targetInfo | `ResTargetInfo` or `nil` | Active target information for the target |
+
+Example
+
+```lua
+local targetInfo = MyAddon:GetTargetInfo("player")
+```
+
+---
+
+#### IsUnitBeingResurrected(unit)
+
+Returns whether a unit is currently being resurrected and, if so, information about the fastest resurrection currently affecting that unit.
+
+Arguments
+
+| Name | Type     | Description                            |
+|------|----------|----------------------------------------|
+| unit | `string` | unitID, GUID, unit name, or name-realm |
+
+Returns
+
+| Return               | Type                            | Description                                     |
+|----------------------|---------------------------------|-------------------------------------------------|
+| isBeingResurrected   | `boolean`                       | Whether the unit is currently being resurrected |
+| fastestGUID          | `string` or `nil`               | Fastest caster GUID, or `nil`                   |
+| fastestRemainingTime | `number` or `nil`               | Remaining cast time in seconds, or `nil`        |
+| fastestResType       | `"SINGLE"` \| `"MASS"` \| `nil` | Fastest resurrection type, or `nil`             |
+
+Example
+
+```lua
+local isBeingResurrected, fastestGUID, fastestRemainingTime, fastestResType = MyAddon:IsUnitBeingResurrected("player")
+```
+
+---
+
+#### UnitCanSelfResurrect(unit)
+
+Returns whether a unit currently has one or more self-resurrection options available.
+
+Arguments
+
+| Name | Type     | Description                            |
+|------|----------|----------------------------------------|
+| unit | `string` | unitID, GUID, unit name, or name-realm |
+
+Returns
+
+| Return     | Type                                    | Description                                                                              |
+|------------|-----------------------------------------|------------------------------------------------------------------------------------------|
+| canSelfRes | `boolean`                               | Whether the unit has at least one self-resurrection option                               |
+| optionInfo | `SelfResOptionInfo` \| `table` \| `nil` | A single `SelfResOptionInfo` table, multiple option tables keyed by option key, or `nil` |
+
+Example
+
+```lua
+local canSelfRes, optionInfo = MyAddon:UnitCanSelfResurrect("player")
+```
+
+---
+
+### Mass Resurrection APIs
+
+---
+
+#### IsMassResBeingCast()
+
+Returns whether any mass resurrection is currently being cast.
+
+Returns
+
+| Return               | Type              | Description                                           |
+|----------------------|-------------------|-------------------------------------------------------|
+| isBeingCast          | `boolean`         | Whether any mass resurrection is currently being cast |
+| fastestMassResGUID   | `string` or `nil` | Fastest mass-resurrection caster GUID, or nil         |
+| fastestRemainingTime | `number` or `nil` | Remaining cast time in seconds, or nil                |
+
+Example
+
+```lua
+local isBeingCast, fastestMassResGUID, fastestRemainingTime = MyAddon:IsMassResBeingCast()
+```
+
+---
+
 ## Callbacks
 
 ---
 
-### ResCast_Started
+### Single-Target Resurrection
+
+---
+
+#### ResCast_Finished
+
+Fired when a single-target resurrection cast successfully completes. This does not indicate that the target is alive.
+
+Arguments
+
+| # | Name       | Type            |
+|---|------------|-----------------|
+| 1 | casterGUID | `string`        |
+| 2 | targetGUID | `string`        |
+| 3 | casterInfo | `ResCastInfo`   |
+| 4 | targetInfo | `ResTargetInfo` |
+
+Notes
+
+- `targetGUID` may be `"UNKNOWN"` if Blizzard never exposed the target before the cast finished.
+- `"UNKNOWN"` targets are not tracked for alive confirmation.
+
+---
+
+#### ResCast_Started
 
 Fired when a single-target resurrection cast begins.
 
 Arguments
 
-| # | Name       | Type          |
-|---|------------|---------------|
-| 1 | casterGUID | string        |
-| 2 | targetGUID | string        |
-| 3 | casterInfo | ResCastInfo   |
-| 4 | targetInfo | ResTargetInfo |
+| # | Name       | Type            |
+|---|------------|-----------------|
+| 1 | casterGUID | `string`        |
+| 2 | targetGUID | `string`        |
+| 3 | casterInfo | `ResCastInfo`   |
+| 4 | targetInfo | `ResTargetInfo` |
 
 Notes
 
@@ -290,7 +322,7 @@ Notes
 
 ---
 
-### ResCast_Stopped
+#### ResCast_Stopped
 
 Fired when a single-target resurrection cast stops before completion.
 
@@ -302,12 +334,12 @@ This includes:
 
 Arguments
 
-| # | Name       | Type                 |
-|---|------------|----------------------|
-| 1 | casterGUID | string               |
-| 2 | targetGUID | string               |
-| 3 | casterInfo | ResCastInfo or nil   |
-| 4 | targetInfo | ResTargetInfo or nil |
+| # | Name       | Type                     |
+|---|------------|--------------------------|
+| 1 | casterGUID | `string`                 |
+| 2 | targetGUID | `string`                 |
+| 3 | casterInfo | `ResCastInfo` or `nil`   |
+| 4 | targetInfo | `ResTargetInfo` or `nil` |
 
 Notes
 
@@ -316,75 +348,99 @@ Notes
 
 ---
 
-### ResCast_Finished
+#### ResTargetGUID_IsAlive
 
-Fired when a single-target resurrection cast successfully completes. This does not indicate that the target is alive.
+Fired when a completed resurrection target becomes alive.
 
 Arguments
 
-| # | Name       | Type          |
-|---|------------|---------------|
-| 1 | casterGUID | string        |
-| 2 | targetGUID | string        |
-| 3 | casterInfo | ResCastInfo   |
-| 4 | targetInfo | ResTargetInfo |
+| # | Name       | Type     |
+|---|------------|----------|
+| 1 | targetGUID | `string` |
 
 Notes
 
-- `targetGUID` may be `"UNKNOWN"` if Blizzard never exposed the target before the cast finished.
-- `"UNKNOWN"` targets are not tracked for alive confirmation.
+- `targetGUID` is always a valid GUID.
+- This callback never fires for `"UNKNOWN"` targets.
 
 ---
 
-### MassResCast_Started
+#### ResTargetGUID_Resolved
 
-Fired when a mass resurrection cast begins.
+Fired when an `"UNKNOWN"` targetGUID becomes resolved to a valid GUID.
 
 Arguments
 
-| # | Name       | Type        |
-|---|------------|-------------|
-| 1 | casterGUID | string      |
-| 2 | casterInfo | ResCastInfo |
+| # | Name       | Type            |
+|---|------------|-----------------|
+| 1 | casterGUID | `string`        |
+| 2 | targetGUID | `string`        |
+| 3 | casterInfo | `ResCastInfo`   |
+| 4 | targetInfo | `ResTargetInfo` |
+
+Notes
+
+- `targetGUID` is always a valid GUID.
 
 ---
 
-### MassResCast_Stopped
-
-Fired when a mass resurrection cast stops before completion.
-
-Arguments
-
-| # | Name       | Type               |
-|---|------------|--------------------|
-| 1 | casterGUID | string             |
-| 2 | casterInfo | ResCastInfo or nil |
+### Mass Resurrection Callbacks
 
 ---
 
-### MassResCast_Finished
+#### MassResCast_Finished
 
 Fired when a mass resurrection cast successfully completes. This does not indicate that any target is alive.
 
 Arguments
 
-| # | Name       | Type        |
-|---|------------|-------------|
-| 1 | casterGUID | string      |
-| 2 | casterInfo | ResCastInfo |
+| # | Name       | Type          |
+|---|------------|---------------|
+| 1 | casterGUID | `string`      |
+| 2 | casterInfo | `ResCastInfo` |
 
 ---
 
-### FastestRes_Changed
+#### MassResCast_Started
 
-Fired when the fastest resurrection changes for a target.
+Fired when a mass resurrection cast begins.
 
 Arguments
 
 | # | Name       | Type          |
 |---|------------|---------------|
-| 1 | targetGUID | string        |
-| 2 | targetInfo | ResTargetInfo |
+| 1 | casterGUID | `string`      |
+| 2 | casterInfo | `ResCastInfo` |
+
+---
+
+#### MassResCast_Stopped
+
+Fired when a mass resurrection cast stops before completion.
+
+Arguments
+
+| # | Name       | Type                   |
+|---|------------|------------------------|
+| 1 | casterGUID | `string`               |
+| 2 | casterInfo | `ResCastInfo` or `nil` |
+
+---
+
+### Fastest Resurrection
+
+---
+
+#### FastestRes_Changed
+
+Fired when the fastest resurrection changes for a target.
+
+Arguments
+
+| # | Name       | Type            |
+|---|------------|-----------------|
+| 1 | targetGUID | `string`        |
+| 2 | targetInfo | `ResTargetInfo` |
 
 Notes
 
@@ -394,70 +450,38 @@ Notes
 
 ---
 
-### ResTargetGUID_Resolved
-
-Fired when an `"UNKNOWN"` targetGUID becomes resolved to a valid GUID.
-
-Arguments
-
-| # | Name       | Type          |
-|---|------------|---------------|
-| 1 | casterGUID | string        |
-| 2 | targetGUID | string        |
-| 3 | casterInfo | ResCastInfo   |
-| 4 | targetInfo | ResTargetInfo |
-
-Notes
-
-- `targetGUID` is always a valid GUID.
+### Self-Resurrection
 
 ---
 
-### ResTargetGUID_IsAlive
-
-Fired when a completed resurrection target becomes alive.
-
-Arguments
-
-| # | Name       | Type   |
-|---|------------|--------|
-| 1 | targetGUID | string |
-
-Notes
-
-- `targetGUID` is always a valid GUID.
-- This callback never fires for `"UNKNOWN"` targets.
-
----
-
-### UnitSelfRes_Available
+#### UnitSelfRes_Available
 
 Fired when a unit gains a self-resurrection option.
 
 Arguments
 
-| # | Name       | Type              |
-|---|------------|-------------------|
-| 1 | unitGUID   | string            |
-| 2 | optionInfo | SelfResOptionInfo |
+| # | Name       | Type                |
+|---|------------|---------------------|
+| 1 | unitGUID   | `string`            |
+| 2 | optionInfo | `SelfResOptionInfo` |
 
 ---
 
-### UnitSelfRes_Consumed
+#### UnitSelfRes_Consumed
 
 Fired when a self-resurrection option is consumed or removed.
 
 Arguments
 
-| # | Name               | Type              |
-|---|--------------------|-------------------|
-| 1 | unitGUID           | string            |
-| 2 | consumedOptionInfo | SelfResOptionInfo |
-| 3 | remainingInfo      | table or nil      |
+| # | Name               | Type                |
+|---|--------------------|---------------------|
+| 1 | unitGUID           | `string`            |
+| 2 | consumedOptionInfo | `SelfResOptionInfo` |
+| 3 | remainingInfo      | `table` or `nil`    |
 
 Notes
 
-- `remainingInfo` is nil if no self-resurrection options remain.
+- `remainingInfo` is `nil` if no self-resurrection options remain.
 
 ---
 
@@ -467,25 +491,25 @@ Notes
 
 ### ResCastInfo
 
-| Field      | Type    | Description                                      |
-|------------|---------|--------------------------------------------------|
-| castGUID   | string  | GUID of the spellcast                            |
-| casterGUID | string  | GUID of the caster                               |
-| castTime   | number  | in seconds                                       |
-| spellID    | integer | EX: 2006 for Resurrection                        |
-| targetGUID | string  | GUID of the target or `"UNKNOWN"`                |
-| textureID  | integer | FileID of the spell's icon                       |
-| endTime    | number  | When the spellcast ends, compared to `GetTime()` |
+| Field      | Type      | Description                                      |
+|------------|-----------|--------------------------------------------------|
+| castGUID   | `string`  | GUID of the spellcast                            |
+| casterGUID | `string`  | GUID of the caster                               |
+| castTime   | `number`  | in seconds                                       |
+| spellID    | `integer` | EX: 2006 for Resurrection                        |
+| targetGUID | `string`  | GUID of the target or `"UNKNOWN"`                |
+| textureID  | `integer` | FileID of the spell's icon                       |
+| endTime    | `number`  | When the spellcast ends, compared to `GetTime()` |
 
 ---
 
 ### ResTargetInfo
 
-| Field             | Type          | Description                       |
-|-------------------|---------------|-----------------------------------|
-| targetGUID        | string        | GUID of the target or `"UNKNOWN"` |
-| fastestCasterGUID | string or nil | GUID of the fastest caster        |
-| fastestResType    | string or nil | `"SINGLE"` \| `"MASS"` \| `nil`   |
+| Field             | Type              | Description                       |
+|-------------------|-------------------|-----------------------------------|
+| targetGUID        | `string`          | GUID of the target or `"UNKNOWN"` |
+| fastestCasterGUID | `string` or `nil` | GUID of the fastest caster        |
+| fastestResType    | `string` or `nil` | `"SINGLE"` \| `"MASS"` \| `nil`   |
 
 Additional caster tables may also exist on this table, keyed by caster GUID.
 
@@ -493,13 +517,13 @@ Additional caster tables may also exist on this table, keyed by caster GUID.
 
 ### SelfResOptionInfo
 
-| Field          | Type           | Description                                                   |
-|----------------|----------------|---------------------------------------------------------------|
-| unitGUID       | string         | GUID of the unit being checked                                |
-| spellID        | integer or nil | EX: 47883 for Soulstone Resurrection Rank 7                   |
-| itemID         | integer or nil | EX: 19290 for Darkmoon Card: Twisting Nether                  |
-| auraInstanceID | integer or nil | Blizzard aura instance ID for the self-res aura               |
-| expirationTime | number or nil  | Absolute expiration time in seconds comparable to `GetTime()` |
+| Field          | Type               | Description                                                   |
+|----------------|--------------------|---------------------------------------------------------------|
+| unitGUID       | `string`           | GUID of the unit being checked                                |
+| spellID        | `integer` or `nil` | EX: 47883 for Soulstone Resurrection Rank 7                   |
+| itemID         | `integer` or `nil` | EX: 19290 for Darkmoon Card: Twisting Nether                  |
+| auraInstanceID | `integer` or `nil` | Blizzard aura instance ID for the self-res aura               |
+| expirationTime | `number` or `nil`  | Absolute expiration time in seconds comparable to `GetTime()` |
 
 Only populated fields are present.
 

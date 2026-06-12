@@ -77,15 +77,20 @@ end
 
 ## Public APIs
 
-LibResInfo-2.0 embeds the following APIs directly onto the addon object:
+LibResInfo-2.0 embeds the following APIs directly onto the addon object.
 
-- `GetFastestCasterForUnit`
-- `GetResurrectionCastInfo`
-- `GetCasterInfo`
-- `GetTargetInfo`
+### Unit-Specific APIs
+
 - `GetAllCastersForUnit`
+- `GetCasterInfo`
+- `GetResurrectionCastInfo`
+- `GetTargetInfo`
 - `IsUnitBeingResurrected`
 - `UnitCanSelfResurrect`
+
+### Mass Resurrection APIs
+
+- `IsMassResBeingCast`
 
 ---
 
@@ -101,15 +106,26 @@ MyAddon:UnregisterAllResInfoCallbacks()
 
 Available callbacks:
 
+### Single-Target Resurrection
+
+- `ResCast_Finished`
 - `ResCast_Started`
 - `ResCast_Stopped`
-- `ResCast_Finished`
+- `ResTargetGUID_IsAlive`
+- `ResTargetGUID_Resolved`
+
+### Mass Resurrection
+
+- `MassResCast_Finished`
 - `MassResCast_Started`
 - `MassResCast_Stopped`
-- `MassResCast_Finished`
+
+### Fastest Resurrection
+
 - `FastestRes_Changed`
-- `ResTargetGUID_Resolved`
-- `ResTargetGUID_IsAlive`
+
+### Self-Resurrection
+
 - `UnitSelfRes_Available`
 - `UnitSelfRes_Consumed`
 
