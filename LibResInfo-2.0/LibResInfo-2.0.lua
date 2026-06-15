@@ -267,6 +267,9 @@ local MASS_RES_SPELLS = {
 
 	-- Evoker
 	[361178]	= true,		-- Mass Return
+
+	-- Guild Perk (Mists)
+	[83968]		= true,		-- Mass Resurrection
 }
 
 local SELF_RES_AURAS = {
