@@ -81,6 +81,8 @@ lib.callbacks = lib.callbacks or LibStub("CallbackHandler-1.0"):New(lib,
 	"UnregisterCallback",
 	"UnregisterAllResInfoCallbacks"
 )
+
+---@type table<table, true>
 lib.embeds = lib.embeds or {}
 
 -- -------------------------------------------------------------------
@@ -166,6 +168,7 @@ local selfResInfo = {}
 -- Spell tables
 -- -------------------------------------------------------------------
 
+---@type table<integer, true>
 local SINGLE_TARGET_RES_SPELLS = {
 	-- Priest
 	[2006]		= true,		-- Resurrection Rank 1
@@ -249,6 +252,7 @@ local SINGLE_TARGET_RES_SPELLS = {
 	[339643]	= true,		-- Gift of Life (Mi'kai's Deathscythe)
 }
 
+---@type table<integer, true>
 local MASS_RES_SPELLS = {
 	-- Priest
 	[212036]	= true,		-- Mass Resurrection
@@ -272,6 +276,7 @@ local MASS_RES_SPELLS = {
 	[83968]		= true,		-- Mass Resurrection
 }
 
+---@type table<integer, true>
 local SELF_RES_AURAS = {
 	[20707]		= true,		-- Soulstone Resurrection Rank 1
 	[20762]		= true,		-- Soulstone Resurrection Rank 2
@@ -288,6 +293,7 @@ local SELF_RES_AURAS = {
 	[280007]	= true,		-- Drust Soulcatcher
 }
 
+---@type table<string, boolean>
 local events = {
 	["INCOMING_RESURRECT_CHANGED"]	= true,
 	["PLAYER_ALIVE"]				= true,
@@ -1352,10 +1358,7 @@ end
 -- -------------------------------------------------------------------
 
 ---@param unit string unitID, GUID, unit name, or name-realm
----@return boolean isBeingResurrected
----@return string|nil fastestGUID
----@return number|nil fastestRemainingTime
----@return ResType|nil fastestResType
+---@return (true, string, number, ResType) | (false, nil, nil, nil) isBeingResurrected, fastestGUID, fastestRemainingTime, fastestResType
 function lib:IsUnitBeingResurrected(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
@@ -1390,9 +1393,7 @@ function lib:IsUnitBeingResurrected(unit)
 	return true, fastestGUID, fastestRemainingTime, fastestResType
 end
 
----@return boolean isBeingCast
----@return string|nil fastestMassResGUID
----@return number|nil fastestRemainingTime
+---@return (true, string, number) | (false, nil, nil) isBeingCast, fastestMassResGUID, fastestRemainingTime
 function lib:IsMassResBeingCast()
 	local fastestMassResGUID, fastestRemainingTime = GetFastestMassResInfo()
 
