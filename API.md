@@ -23,6 +23,7 @@ The library tracks:
     - [GetTargetInfo(unit)](#gettargetinfounit)
     - [IsUnitBeingResurrected(unit)](#isunitbeingresurrectedunit)
     - [UnitCanSelfResurrect(unit)](#unitcanselfresurrectunit)
+    - [UnitHasResWaiting(unit)](#unithasreswaitingunit)
   - [Mass Resurrection APIs](#mass-resurrection-apis)
     - [IsMassResBeingCast()](#ismassresbeingcast)
 - [Callbacks](#callbacks)
@@ -32,6 +33,7 @@ The library tracks:
     - [ResCast_Stopped](#rescast_stopped)
     - [ResTargetGUID_IsAlive](#restargetguid_isalive)
     - [ResTargetGUID_Resolved](#restargetguid_resolved)
+    - [ResTargetGUID_WaitingTimeExpired](#restargetguid_waitingtimeexpired)
   - [Mass Resurrection](#mass-resurrection-callbacks)
     - [MassResCast_Finished](#massrescast_finished)
     - [MassResCast_Started](#massrescast_started)
@@ -47,6 +49,7 @@ The library tracks:
   - [SelfResOptionInfo](#selfresoptioninfo)
 - [Unknown Targets](#unknown-targets)
 - [Mass Resurrection](#mass-resurrection)
+- [Resurrection Waiting State](#resurrection-waiting-state)
 - [Callback Tables](#callback-tables)
 - [API Validation](#api-validation)
 
@@ -213,14 +216,14 @@ Returns
 | Return               | Type                            | Description                                     |
 |----------------------|---------------------------------|-------------------------------------------------|
 | isBeingResurrected   | `boolean`                       | Whether the unit is currently being resurrected |
-| fastestGUID          | `string` or `nil`               | Fastest caster GUID, or `nil`                   |
+| fastestCasterGUID    | `string` or `nil`               | Fastest caster GUID, or `nil`                   |
 | fastestRemainingTime | `number` or `nil`               | Remaining cast time in seconds, or `nil`        |
 | fastestResType       | `"SINGLE"` \| `"MASS"` \| `nil` | Fastest resurrection type, or `nil`             |
 
 Example
 
 ```lua
-local isBeingResurrected, fastestGUID, fastestRemainingTime, fastestResType = MyAddon:IsUnitBeingResurrected("player")
+local isBeingResurrected, fastestCasterGUID, fastestRemainingTime, fastestResType = MyAddon:IsUnitBeingResurrected("player")
 ```
 
 ---
@@ -246,6 +249,31 @@ Example
 
 ```lua
 local canSelfRes, optionInfo = MyAddon:UnitCanSelfResurrect("player")
+```
+
+---
+
+#### UnitHasResWaiting(unit)
+
+Returns whether a unit currently has a resurrection offer waiting to be accepted.
+
+Arguments
+
+| Name | Type     | Description                            |
+|------|----------|----------------------------------------|
+| unit | `string` | unitID, GUID, unit name, or name-realm |
+
+Returns
+
+| Return        | Type               | Description                                      |
+|---------------|--------------------|--------------------------------------------------|
+| hasResWaiting | `boolean`          | Whether the unit has an active waiting offer     |
+| remainingTime | `number` or `nil`  | Remaining waiting time in seconds, or `nil`      |
+
+Example
+
+```lua
+local hasResWaiting, remainingTime = MyAddon:UnitHasResWaiting("player")
 ```
 
 ---
@@ -381,6 +409,24 @@ Arguments
 Notes
 
 - `targetGUID` is always a valid GUID.
+
+---
+
+#### ResTargetGUID_WaitingTimeExpired
+
+Fired when a resurrection offer expires without the target becoming alive.
+
+Arguments
+
+| # | Name       | Type     |
+|---|------------|----------|
+| 1 | targetGUID | `string` |
+
+Notes
+
+- `targetGUID` is always a valid GUID.
+- This callback never fires for `"UNKNOWN"` targets.
+- If the target becomes alive before the waiting timer expires, the waiting state is cleared silently and this callback is not fired.
 
 ---
 
@@ -553,6 +599,40 @@ Because of this:
 ## Mass Resurrection
 
 Mass resurrection casts do not expose target GUIDs.
+
+---
+
+## Resurrection Waiting State
+
+After a resurrection cast successfully finishes, LibResInfo-2.0 may track the target in a waiting state while the resurrection offer remains available.
+
+Known target GUIDs enter this state after:
+
+- `ResCast_Finished`
+- `MassResCast_Finished`
+
+The waiting state ends when:
+
+- the target becomes alive
+- the resurrection offer expires
+
+Waiting state information can be queried through:
+
+```lua
+local hasResWaiting, remainingTime = MyAddon:UnitHasResWaiting(unit)
+```
+
+Related callbacks:
+
+- `ResTargetGUID_IsAlive`
+- `ResTargetGUID_WaitingTimeExpired`
+
+Notes
+
+- Waiting state tracking only occurs for known target GUIDs.
+- `"UNKNOWN"` targets are never tracked in the waiting state.
+- A target becoming alive clears the waiting state immediately.
+- Expired waiting states fire `ResTargetGUID_WaitingTimeExpired`.
 
 ---
 

@@ -87,6 +87,7 @@ LibResInfo-2.0 embeds the following APIs directly onto the addon object.
 - `GetTargetInfo`
 - `IsUnitBeingResurrected`
 - `UnitCanSelfResurrect`
+- `UnitHasResWaiting`
 
 ### Mass Resurrection APIs
 
@@ -113,6 +114,7 @@ Available callbacks:
 - `ResCast_Stopped`
 - `ResTargetGUID_IsAlive`
 - `ResTargetGUID_Resolved`
+- `ResTargetGUID_WaitingTimeExpired`
 
 ### Mass Resurrection
 
@@ -136,6 +138,8 @@ Available callbacks:
 - `targetGUID` may temporarily be `"UNKNOWN"` if Blizzard does not expose enough information to resolve the target immediately.
 - Mass resurrection spells do not expose target GUIDs.
 - Callback info tables should be treated as read-only.
+- Completed resurrection targets may enter a waiting state until their resurrection popup expires.
+- `UnitHasResWaiting()` can be used to query this waiting state.
 
 ---
 
