@@ -1,0 +1,126 @@
+name: Bug report
+description: Report a defect in LibResInfo-2.0 or its integration in a consumer addon
+title: "[Bug]: "
+labels:
+  - bug
+assignees:
+  - Myrroddin
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. Please provide as much detail as you can.
+
+        Tips:
+        - For developer builds, include a commit hash when possible.
+        - If you have an error from BugSack/BugGrabber, paste it below in the Lua block.
+
+  - type: checkboxes
+    id: clients
+    attributes:
+      label: Affected WoW client(s)
+      description: Select one or more clients where this issue occurs.
+      options:
+        - label: Classic Era
+        - label: The Burning Crusade Classic
+        - label: Wrath of the Lich King Classic (Titan Reforged)
+        - label: Mists of Pandaria Classic
+        - label: Mainline / Retail
+    validations:
+      required: true
+
+  - type: input
+    id: library_version
+    attributes:
+      label: Library version or revision
+      description: Use tag/version if released; for developer builds include commit hash.
+      placeholder: "e.g. v2.0.0-dev (commit abc1234)"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: locale
+    attributes:
+      label: Game locale
+      description: Select the locale active when the bug occurred.
+      options:
+        - enUS
+        - deDE
+        - esES
+        - esMX
+        - frFR
+        - itIT
+        - koKR
+        - ptBR
+        - ruRU
+        - zhCN
+        - zhTW
+        - Other / custom
+    validations:
+      required: true
+
+  - type: input
+    id: consumer_addon
+    attributes:
+      label: Consumer addon using this library
+      description: Name the addon that triggers the issue.
+      placeholder: "e.g. SomeAddon"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Provide a minimal, numbered set of steps.
+      placeholder: |
+        1. Install ...
+        2. Open ...
+        3. Click ...
+        4. Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: What should happen instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: What happened?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: Reproduction frequency
+      options:
+        - Always
+        - Often
+        - Sometimes
+        - Rarely
+        - Only once
+    validations:
+      required: true
+
+  - type: textarea
+    id: lua_error
+    attributes:
+      label: BugSack/BugGrabber error output (Lua)
+      description: Paste the complete error if available.
+      render: lua
+      placeholder: |
+        -- Paste stack trace and error text here
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Optional notes, screenshots, or related links.

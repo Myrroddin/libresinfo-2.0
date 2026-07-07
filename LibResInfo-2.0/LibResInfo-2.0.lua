@@ -20,71 +20,41 @@ Core rules:
 assert(LibStub, "LibResInfo-2.0 requires LibStub")
 assert(LibStub("CallbackHandler-1.0", true), "LibResInfo-2.0 requires CallbackHandler-1.0")
 
----@class LibResInfo-2.0: table
+---@class LibResInfo-2.0
+---@field RegisterCallback fun(target: table, eventName: LibResInfoCallbackName, method: string, arg?: any)
+---@field UnregisterCallback fun(target: table, eventName: LibResInfoCallbackName)
+---@field UnregisterAllResInfoCallbacks fun(target: table)
 local lib = LibStub:NewLibrary("LibResInfo-2.0", 1)
 if not lib then return end
 
----@alias ResType "SINGLE"|"MASS"
----@alias SelfResOptionTable table<string, SelfResOptionInfo>
----@alias ResCasterTable table<string, ResType>
-
 -- Callback names accepted by RegisterCallback and UnregisterCallback.
----@alias LibResInfoCallback
----| "FastestRes_Changed"
----| "MassResCast_Finished"
----| "MassResCast_Started"
----| "MassResCast_Stopped"
----| "ResCast_Finished"
----| "ResCast_Started"
----| "ResCast_Stopped"
----| "ResTargetGUID_Resolved"
----| "ResTargetGUID_IsAlive"
----| "ResTargetGUID_WaitingTimeExpired"
----| "UnitSelfRes_Available"
----| "UnitSelfRes_Consumed"
-
----@class CallbackHandlerRegistry
----@field Fire fun(self: CallbackHandlerRegistry, eventName: LibResInfoCallback, ...: any)
-
----@class NamePlateFrame
----@field unitToken string
-
----@class ResCastInfo
----@field castGUID? string
----@field casterGUID string
----@field castTime? number
----@field spellID integer
----@field targetGUID? string
----@field textureID? integer
----@field endTime? number
-
----@class ResTargetInfo
----@field targetGUID string
----@field fastestCasterGUID? string
----@field fastestResType? ResType
-
----@class SelfResurrectOption
----@field spellID? integer
----@field itemID? integer
----@field auraInstanceID? integer
----@field expirationTime? number
-
----@class SelfResOptionInfo
----@field unitGUID string
----@field spellID? integer
----@field itemID? integer
----@field auraInstanceID? integer
----@field expirationTime? number
-
----@type CallbackHandlerRegistry
 lib.callbacks = lib.callbacks or LibStub("CallbackHandler-1.0"):New(lib,
 	"RegisterCallback",
 	"UnregisterCallback",
 	"UnregisterAllResInfoCallbacks"
 )
 
----@type table<table, true>
 lib.embeds = lib.embeds or {}
+
+---@class LibResInfoSelfResurrectOption
+---@field spellID? integer
+---@field itemID? integer
+---@field auraInstanceID? integer
+---@field expirationTime? number
+
+---@alias LibResInfoCallbackName
+---| "ResCast_Started"
+---| "ResCast_Stopped"
+---| "ResCast_Finished"
+---| "MassResCast_Started"
+---| "MassResCast_Stopped"
+---| "MassResCast_Finished"
+---| "FastestRes_Changed"
+---| "ResTargetGUID_Resolved"
+---| "ResTargetGUID_IsAlive"
+---| "ResTargetGUID_WaitingTimeExpired"
+---| "UnitSelfRes_Available"
+---| "UnitSelfRes_Consumed"
 
 -- -------------------------------------------------------------------
 -- Event frame
@@ -147,40 +117,32 @@ local UNKNOWN_TARGET_GUID = "UNKNOWN"
 -- -------------------------------------------------------------------
 
 -- Active single-target resurrection casts, keyed by caster GUID.
----@type table<string, ResCastInfo>
 local resCasterInfo = {}
 
 -- Active mass resurrection casts, keyed by caster GUID.
----@type table<string, ResCastInfo>
 local massResCasterInfo = {}
 
 -- Active single-target resurrection casts, keyed by target GUID, then caster GUID.
 -- The UNKNOWN key is a temporary staging area for unresolved casts and is not
 -- treated as a real target for fastest-caster calculations.
----@type table<string, ResTargetInfo>
 local resTargetInfo = {}
 
 -- Targets whose resurrection cast finished, but whose alive state has not yet been observed.
----@type table<string, true>
 local ressedTargetGUIDs = {}
 
 -- Targets with active resurrection offers waiting to be accepted, keyed by target GUID.
----@type table<string, number>
 local resWaitingExpireTimes = {}
 
 -- Mass resurrection affected targets, keyed by caster GUID, then target GUID.
----@type table<string, table<string, true>>
 local massResTargetGUIDs = {}
 
 -- Self-resurrection options, keyed by unit GUID, then option key.
----@type table<string, SelfResOptionTable>
 local selfResInfo = {}
 
 -- -------------------------------------------------------------------
 -- Spell tables
 -- -------------------------------------------------------------------
 
----@type table<integer, true>
 local SINGLE_TARGET_RES_SPELLS = {
 	-- Priest
 	[2006]		= true,		-- Resurrection Rank 1
@@ -264,7 +226,6 @@ local SINGLE_TARGET_RES_SPELLS = {
 	[339643]	= true,		-- Gift of Life (Mi'kai's Deathscythe)
 }
 
----@type table<integer, true>
 local MASS_RES_SPELLS = {
 	-- Priest
 	[212036]	= true,		-- Mass Resurrection
@@ -288,7 +249,6 @@ local MASS_RES_SPELLS = {
 	[83968]		= true,		-- Mass Resurrection
 }
 
----@type table<integer, true>
 local SELF_RES_AURAS = {
 	[20707]		= true,		-- Soulstone Resurrection Rank 1
 	[20762]		= true,		-- Soulstone Resurrection Rank 2
@@ -305,7 +265,6 @@ local SELF_RES_AURAS = {
 	[280007]	= true,		-- Drust Soulcatcher
 }
 
----@type table<string, boolean>
 local events = {
 	["INCOMING_RESURRECT_CHANGED"]	= true,
 	["PLAYER_ALIVE"]				= true,
@@ -1031,12 +990,11 @@ local function UpdatePlayerSelfResOptions()
 
 	local seen = {}
 
-	---@type SelfResurrectOption[]|nil
+	---@type LibResInfoSelfResurrectOption[]|nil
 	local options = GetSelfResurrectOptions()
 
 	if options then
 		for _, option in pairs(options) do
-			---@type SelfResOptionInfo
 			local optionInfo = {
 				unitGUID = unitGUID,
 			}
@@ -1078,7 +1036,6 @@ local function UpdateUnitSelfResAuras(unitID)
 		local aura = GetUnitAuraBySpellID(unitID, spellID)
 
 		if aura then
-			---@type SelfResOptionInfo
 			local optionInfo = {
 				unitGUID = unitGUID,
 				spellID = spellID,
@@ -1490,8 +1447,11 @@ end
 -- Public APIs
 -- -------------------------------------------------------------------
 
----@param unit string unitID, GUID, unit name, or name-realm
----@return (true, string, number, ResType) | (false, nil, nil, nil) isBeingResurrected, fastestGUID, fastestRemainingTime, fastestResType
+---@param unit string
+---@return boolean isBeingResurrected
+---@return string|nil fastestGUID
+---@return number|nil fastestRemainingTime
+---@return "SINGLE"|"MASS"|nil fastestResType
 function lib:IsUnitBeingResurrected(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
@@ -1526,7 +1486,9 @@ function lib:IsUnitBeingResurrected(unit)
 	return true, fastestGUID, fastestRemainingTime, fastestResType
 end
 
----@return (true, string, number) | (false, nil, nil) isBeingCast, fastestMassResGUID, fastestRemainingTime
+---@return boolean isMassResBeingCast
+---@return string|nil fastestMassResGUID
+---@return number|nil fastestRemainingTime
 function lib:IsMassResBeingCast()
 	local fastestMassResGUID, fastestRemainingTime = GetFastestMassResInfo()
 
@@ -1537,8 +1499,9 @@ function lib:IsMassResBeingCast()
 	return false, nil, nil
 end
 
----@param unit string unitID, GUID, unit name, or name-realm
----@return (true, number) | (false, nil) hasResWaiting, remainingTime
+---@param unit string
+---@return boolean hasResWaiting
+---@return number|nil remainingTime
 function lib:UnitHasResWaiting(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
@@ -1559,9 +1522,9 @@ function lib:UnitHasResWaiting(unit)
 	return true, remainingTime
 end
 
----@param unit string unitID, GUID, unit name, or name-realm
----@return boolean canSelfRes
----@return SelfResOptionInfo|SelfResOptionTable|nil optionInfo
+---@param unit string
+---@return boolean canSelfResurrect
+---@return table|nil selfResInfo
 function lib:UnitCanSelfResurrect(unit)
 	local unitGUID = ResolvePublicUnitArg(unit)
 	if not unitGUID then
@@ -1596,10 +1559,10 @@ function lib:UnitCanSelfResurrect(unit)
 	return true, firstOption
 end
 
----@param unit string unitID, GUID, unit name, or name-realm
----@return number|false endTime Absolute cast end time, comparable to GetTime()
+---@param unit string
+---@return number|false endTime
 ---@return string|nil targetGUID
----@return ResType|nil resType
+---@return "SINGLE"|"MASS"|nil resType
 function lib:GetResurrectionCastInfo(unit)
 	local casterGUID = ResolvePublicUnitArg(unit)
 	if not casterGUID then
@@ -1619,8 +1582,8 @@ function lib:GetResurrectionCastInfo(unit)
 	return false, nil, nil
 end
 
----@param unit string unitID, GUID, unit name, or name-realm
----@return ResCastInfo|nil casterInfo
+---@param unit string
+---@return table|nil casterInfo
 function lib:GetCasterInfo(unit)
 	local casterGUID = ResolvePublicUnitArg(unit)
 	if not casterGUID then
@@ -1630,8 +1593,8 @@ function lib:GetCasterInfo(unit)
 	return resCasterInfo[casterGUID] or massResCasterInfo[casterGUID]
 end
 
----@param unit string unitID, GUID, unit name, or name-realm
----@return ResTargetInfo|nil targetInfo
+---@param unit string
+---@return table|nil targetInfo
 function lib:GetTargetInfo(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
@@ -1641,8 +1604,8 @@ function lib:GetTargetInfo(unit)
 	return resTargetInfo[targetGUID]
 end
 
----@param unit string unitID, GUID, unit name, or name-realm
----@return ResCasterTable|nil casters
+---@param unit string
+---@return table<string, "SINGLE"|"MASS">|nil casters
 function lib:GetAllCastersForUnit(unit)
 	local targetGUID = ResolvePublicUnitArg(unit)
 	if not targetGUID then
@@ -1679,20 +1642,6 @@ end
 -- Embed mixins into target addon objects
 -- -------------------------------------------------------------------
 
----@alias LibResInfoMixin
----| "GetAllCastersForUnit"
----| "GetCasterInfo"
----| "GetResurrectionCastInfo"
----| "GetTargetInfo"
----| "IsMassResBeingCast"
----| "IsUnitBeingResurrected"
----| "RegisterCallback"
----| "UnitCanSelfResurrect"
----| "UnitHasResWaiting"
----| "UnregisterAllResInfoCallbacks"
----| "UnregisterCallback"
-
----@type LibResInfoMixin[]
 local mixins = {
 	"GetAllCastersForUnit",
 	"GetCasterInfo",
@@ -1707,8 +1656,6 @@ local mixins = {
 	"UnregisterCallback",
 }
 
----@param target table
----@return table
 function lib:Embed(target)
 	for _, methodName in pairs(mixins) do
 		target[methodName] = self[methodName]

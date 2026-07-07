@@ -36,12 +36,12 @@ Supported clients:
 
 ### .pkgmeta
 
-LibResInfo-2.0 should embed the child folder:
+AddOns should embed the child folder:
 
 ```yaml
 externals:
   Libs/LibResInfo-2.0:
-    url: https://github.com/Myrroddin/libresinfo-2.0/trunk/LibResInfo-2.0
+    url: https://github.com/Myrroddin/libresinfo-2.0.git/LibResInfo-2.0
 ```
 
 ### TOC
@@ -146,3 +146,7 @@ Available callbacks:
 ## Documentation
 
 See [API.md](./API.md) for complete API and callback documentation.
+
+## Bug Reports
+
+Report a bug: [GitHub Bug Report Form](https://github.com/Myrroddin/libresinfo-2.0/issues/new?template=bug_report.yml)
