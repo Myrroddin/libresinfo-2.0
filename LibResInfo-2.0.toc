@@ -1,18 +1,18 @@
-## Interface: 120007, 50504, 38001, 20505, 11508
+## Interface: 120007, 50504, 38001, 20506, 11508
 ## Title: Lib: ResInfo-2.0
 ## Notes: Library to provide information about resurrections in your group
-## Notes-deDE: @localization(locale="deDE", key="Notes", namespace="ToC")@
-## Notes-esES: @localization(locale="esES", key="Notes", namespace="ToC")@
-## Notes-esMX: @localization(locale="esMX", key="Notes", namespace="ToC")@
-## Notes-frFR: @localization(locale="frFR", key="Notes", namespace="ToC")@
-## Notes-itIT: @localization(locale="itIT", key="Notes", namespace="ToC")@
-## Notes-koKR: @localization(locale="koKR", key="Notes", namespace="ToC")@
-## Notes-ptBR: @localization(locale="ptBR", key="Notes", namespace="ToC")@
-## Notes-ruRU: @localization(locale="ruRU", key="Notes", namespace="ToC")@
-## Notes-zhCN: @localization(locale="zhCN", key="Notes", namespace="ToC")@
-## Notes-zhTW: @localization(locale="zhTW", key="Notes", namespace="ToC")@
+## Notes-deDE: Bibliothek zur Bereitstellung von Informationen über Wiederbelebungen in deiner Gruppe
+## Notes-esES: Biblioteca para proporcionar información sobre las resurrecciones en tu grupo
+## Notes-esMX: Biblioteca para proporcionar información sobre las resurrecciones de tu grupo
+## Notes-frFR: Bibliothèque fournissant des informations sur les résurrections de votre groupe
+## Notes-itIT: Libreria per fornire informazioni sulle resurrezioni del tuo gruppo
+## Notes-koKR: 파티의 부활 정보를 제공하는 라이브러리
+## Notes-ptBR: Biblioteca para fornecer informações sobre as ressurreições do seu grupo
+## Notes-ruRU: Библиотека, предоставляющая информацию о воскрешениях в вашей группе
+## Notes-zhCN: 提供队伍复活信息的函数库
+## Notes-zhTW: 提供隊伍復活資訊的函式庫
 ## Version: @project-version@
-## X-Date: @project-date@
+## X-Date: @project-date-iso@
 ## X-Project-Revision: @project-revision@
 
 ## Author: Paul Vandersypen
