@@ -23,6 +23,10 @@ Core rules:
 assert(LibStub, "LibResInfo-2.0 requires LibStub")
 assert(LibStub("CallbackHandler-1.0", true), "LibResInfo-2.0 requires CallbackHandler-1.0")
 
+---@class LibResInfo-2.0
+---@field RegisterCallback fun(target: table, eventName: LibResInfoCallbackName, method: string, arg?: any)
+---@field UnregisterCallback fun(target: table, eventName: LibResInfoCallbackName)
+---@field UnregisterAllResInfoCallbacks fun(target: table)
 local lib = LibStub:NewLibrary("LibResInfo-2.0", 1)
 if not lib then return end
 
@@ -60,10 +64,12 @@ lib.embeds = lib.embeds or {}
 -- -------------------------------------------------------------------
 
 local frame = CreateFrame("Frame")
+local eventHandlers = {}
+
 frame:SetScript("OnEvent", function(_, event, ...)
-	local handler = lib[event]
+	local handler = eventHandlers[event]
 	if handler then
-		handler(lib, event, ...)
+		handler(...)
 	end
 end)
 
@@ -312,6 +318,12 @@ local function SetIfPresent(info, key, value)
 	end
 end
 
+-- Accept terminal spellcast events when either side lacks a cast GUID, but
+-- reject an event which explicitly belongs to a different tracked cast.
+local function CastGUIDMatches(casterInfo, castGUID)
+	return not casterInfo.castGUID or not castGUID or casterInfo.castGUID == castGUID
+end
+
 -- UnitCastingInfo returns cast times in milliseconds. LibResInfo exposes
 -- seconds, with endTime comparable to GetTime().
 local function GetCastTimes(startTimeMs, endTimeMs)
@@ -477,6 +489,24 @@ local function UpdateAllFastestCasterGUIDs()
 	return changedTargetInfo
 end
 
+-- Fire one fastest-res callback after its triggering lifecycle callback has
+-- already exposed the cast state to consumers.
+local function FireFastestResChanged(targetInfo)
+	if targetInfo then
+		lib.callbacks:Fire("FastestRes_Changed", targetInfo.targetGUID, targetInfo)
+	end
+end
+
+-- Fire fastest-res callbacks for mass-res changes, which can affect many
+-- known targets at once.
+local function FireFastestResChangedList(changedTargetInfo)
+	if not changedTargetInfo then return end
+
+	for _, targetInfo in pairs(changedTargetInfo) do
+		FireFastestResChanged(targetInfo)
+	end
+end
+
 -- Find the mass resurrection cast which will complete first.
 --
 -- Returns the caster GUID and remaining cast time in seconds.
@@ -584,38 +614,49 @@ end
 -- Active resurrection state
 -- -------------------------------------------------------------------
 
+-- Copy fields shared by every tracked resurrection cast. SetIfMissing keeps
+-- earlier, more precise event data when later events provide only partial data.
+local function ApplyCastInfo(info, casterGUID, castInfo)
+	SetIfMissing(info, "castGUID", castInfo.castGUID)
+	SetIfMissing(info, "casterGUID", casterGUID)
+	SetIfMissing(info, "castTime", castInfo.castTime)
+	SetIfMissing(info, "spellID", castInfo.spellID)
+	SetIfMissing(info, "textureID", castInfo.textureID)
+	SetIfMissing(info, "endTime", castInfo.endTime)
+end
+
 -- Mirror a single-target cast onto both lookup directions:
 -- casterGUID -> ResCastInfo and targetGUID -> casterGUID -> ResCastInfo.
---
--- Keeping both tables in sync makes public caster queries and target queries
--- cheap, while SetIfMissing preserves earlier, more precise event data.
 local function ApplySingleCastInfo(casterInfo, targetInfo, casterGUID, targetGUID, castInfo)
-	SetIfMissing(casterInfo, "castGUID", castInfo.castGUID)
-	SetIfMissing(casterInfo, "casterGUID", casterGUID)
-	SetIfMissing(casterInfo, "castTime", castInfo.castTime)
-	SetIfMissing(casterInfo, "spellID", castInfo.spellID)
+	ApplyCastInfo(casterInfo, casterGUID, castInfo)
 	SetIfMissing(casterInfo, "targetGUID", targetGUID)
-	SetIfMissing(casterInfo, "textureID", castInfo.textureID)
-	SetIfMissing(casterInfo, "endTime", castInfo.endTime)
 
-	SetIfMissing(targetInfo, "castGUID", castInfo.castGUID)
-	SetIfMissing(targetInfo, "casterGUID", casterGUID)
-	SetIfMissing(targetInfo, "castTime", castInfo.castTime)
-	SetIfMissing(targetInfo, "spellID", castInfo.spellID)
+	ApplyCastInfo(targetInfo, casterGUID, castInfo)
 	SetIfMissing(targetInfo, "targetGUID", targetGUID)
-	SetIfMissing(targetInfo, "textureID", castInfo.textureID)
-	SetIfMissing(targetInfo, "endTime", castInfo.endTime)
 end
 
 -- Mass-res cast data is caster-only because Blizzard does not expose targets
 -- through the cast itself. Affected target GUIDs are snapshotted separately.
 local function ApplyMassCastInfo(casterInfo, casterGUID, castInfo)
-	SetIfMissing(casterInfo, "castGUID", castInfo.castGUID)
-	SetIfMissing(casterInfo, "casterGUID", casterGUID)
-	SetIfMissing(casterInfo, "castTime", castInfo.castTime)
-	SetIfMissing(casterInfo, "spellID", castInfo.spellID)
-	SetIfMissing(casterInfo, "textureID", castInfo.textureID)
-	SetIfMissing(casterInfo, "endTime", castInfo.endTime)
+	ApplyCastInfo(casterInfo, casterGUID, castInfo)
+end
+
+-- Initialize and update both lookup directions for one single-target cast.
+--
+-- The caller supplies the authoritative caster GUID, which may intentionally be
+-- the cached PLAYER_GUID rather than a GUID derived from the event unitID.
+local function StoreSingleCastInfo(casterGUID, targetGUID, castInfo)
+	resCasterInfo[casterGUID] = resCasterInfo[casterGUID] or {}
+	resTargetInfo[targetGUID] = resTargetInfo[targetGUID] or {}
+	resTargetInfo[targetGUID].targetGUID = resTargetInfo[targetGUID].targetGUID or targetGUID
+	resTargetInfo[targetGUID][casterGUID] = resTargetInfo[targetGUID][casterGUID] or {}
+
+	local casterInfo = resCasterInfo[casterGUID]
+	local targetCasterInfo = resTargetInfo[targetGUID][casterGUID]
+
+	ApplySingleCastInfo(casterInfo, targetCasterInfo, casterGUID, targetGUID, castInfo)
+
+	return casterInfo, targetCasterInfo
 end
 
 -- Read the currently visible cast from a unit token and normalize its timing.
@@ -652,12 +693,7 @@ local function PopulateSingleResInfo(unitID, casterGUID, castInfo)
 	or existingTargetGUID
 	or UNKNOWN_TARGET_GUID
 
-	resCasterInfo[casterGUID] = resCasterInfo[casterGUID] or {}
-	resTargetInfo[targetGUID] = resTargetInfo[targetGUID] or {}
-	resTargetInfo[targetGUID].targetGUID = resTargetInfo[targetGUID].targetGUID or targetGUID
-	resTargetInfo[targetGUID][casterGUID] = resTargetInfo[targetGUID][casterGUID] or {}
-
-	ApplySingleCastInfo(resCasterInfo[casterGUID], resTargetInfo[targetGUID][casterGUID], casterGUID, targetGUID, castInfo)
+	StoreSingleCastInfo(casterGUID, targetGUID, castInfo)
 
 	return targetGUID, UpdateFastestCasterGUID(targetGUID)
 end
@@ -929,7 +965,9 @@ local function MarkResWaitingTargetGUID(targetGUID)
 		if resWaitingExpireTimes[targetGUID] ~= expireTime then return end
 
 		local unitID = UnitTokenFromGUID(targetGUID)
-		if unitID and UnitHealth(unitID) and UnitHealth(unitID) > 0 then
+		local health = unitID and UnitHealth(unitID)
+
+		if health and health > 0 then
 			resWaitingExpireTimes[targetGUID] = nil
 			return
 		end
@@ -1130,14 +1168,9 @@ end
 -- -------------------------------------------------------------------
 
 -- Register runtime events after PLAYER_LOGIN so player GUID and client state
--- are initialized. Some events are aliases that share one handler.
+-- are initialized. PLAYER_LOGIN remains the bootstrap event, while
+-- NEUTRAL_FACTION_SELECT_RESULT is registered separately only when needed.
 local function RegisterEvents()
-	lib.UNIT_SPELLCAST_FAILED		= lib.UNIT_SPELLCAST_STOP
-	lib.UNIT_SPELLCAST_FAILED_QUIET	= lib.UNIT_SPELLCAST_STOP
-	lib.UNIT_SPELLCAST_INTERRUPTED	= lib.UNIT_SPELLCAST_STOP
-	lib.PLAYER_ALIVE				= lib.UNIT_HEALTH
-	lib.PLAYER_UNGHOST				= lib.UNIT_HEALTH
-
 	for event, enabled in pairs(events) do
 		if enabled then
 			frame:RegisterEvent(event)
@@ -1150,7 +1183,7 @@ end
 -- -------------------------------------------------------------------
 
 -- Initialize state and register runtime events.
-function lib:PLAYER_LOGIN()
+local function PLAYER_LOGIN()
 	PLAYER_GUID = PLAYER_GUID or UnitGUID("player")
 
 	wipe(resCasterInfo)
@@ -1172,7 +1205,7 @@ end
 
 -- Neutral Pandaren can change faction after login. Refresh PLAYER_GUID after
 -- faction selection because later player-cast tracking depends on it.
-function lib:NEUTRAL_FACTION_SELECT_RESULT(_, success)
+local function NEUTRAL_FACTION_SELECT_RESULT(success)
 	if success then
 		local factionGroup = UnitFactionGroup("player")
 
@@ -1189,26 +1222,17 @@ end
 -- target token, cast GUID, and spell ID. UnitCastingInfo is read immediately to
 -- fill accurate timing/icon data when available, so player casts do not depend
 -- on a later UNIT_SPELLCAST_START.
-function lib:UNIT_SPELLCAST_SENT(_, unitID, targetID, castGUID, spellID)
+local function UNIT_SPELLCAST_SENT(unitID, targetID, castGUID, spellID)
 	local castInfo = GetPlayerSentCastInfo(unitID, castGUID, spellID)
 
 	if SINGLE_TARGET_RES_SPELLS[spellID] then
 		local targetGUID = UnitGUID(targetID) or UNKNOWN_TARGET_GUID
 
-		resCasterInfo[PLAYER_GUID] = resCasterInfo[PLAYER_GUID] or {}
-		resTargetInfo[targetGUID] = resTargetInfo[targetGUID] or {}
-		resTargetInfo[targetGUID].targetGUID = resTargetInfo[targetGUID].targetGUID or targetGUID
-		resTargetInfo[targetGUID][PLAYER_GUID] = resTargetInfo[targetGUID][PLAYER_GUID] or {}
-
-		ApplySingleCastInfo(resCasterInfo[PLAYER_GUID], resTargetInfo[targetGUID][PLAYER_GUID], PLAYER_GUID, targetGUID, castInfo)
-
+		local casterInfo = StoreSingleCastInfo(PLAYER_GUID, targetGUID, castInfo)
 		local fastestTargetInfo = UpdateFastestCasterGUID(targetGUID)
 
-		lib.callbacks:Fire("ResCast_Started", PLAYER_GUID, targetGUID, resCasterInfo[PLAYER_GUID], GetCallbackTargetInfo(targetGUID, PLAYER_GUID))
-
-		if fastestTargetInfo then
-			lib.callbacks:Fire("FastestRes_Changed", fastestTargetInfo.targetGUID, fastestTargetInfo)
-		end
+		lib.callbacks:Fire("ResCast_Started", PLAYER_GUID, targetGUID, casterInfo, GetCallbackTargetInfo(targetGUID, PLAYER_GUID))
+		FireFastestResChanged(fastestTargetInfo)
 	elseif MASS_RES_SPELLS[spellID] then
 		massResCasterInfo[PLAYER_GUID] = massResCasterInfo[PLAYER_GUID] or {}
 
@@ -1219,11 +1243,7 @@ function lib:UNIT_SPELLCAST_SENT(_, unitID, targetID, castGUID, spellID)
 
 		lib.callbacks:Fire("MassResCast_Started", PLAYER_GUID, massResCasterInfo[PLAYER_GUID])
 
-		if fastestTargetInfo then
-			for _, targetInfo in pairs(fastestTargetInfo) do
-				lib.callbacks:Fire("FastestRes_Changed", targetInfo.targetGUID, targetInfo)
-			end
-		end
+		FireFastestResChangedList(fastestTargetInfo)
 	end
 end
 
@@ -1234,7 +1254,7 @@ end
 -- That target value may be either name or name-realm.
 -- Player casts are handled by UNIT_SPELLCAST_SENT to avoid duplicate started
 -- callbacks and to trust the player-specific target data from that event.
-function lib:UNIT_SPELLCAST_START(_, unitID)
+local function UNIT_SPELLCAST_START(unitID)
 	if unitID == "player" then return end
 
 	local resType, casterGUID, targetGUID, fastestTargetInfo = PopulateResInfoTables(unitID)
@@ -1242,17 +1262,11 @@ function lib:UNIT_SPELLCAST_START(_, unitID)
 	if resType == "SINGLE" and targetGUID then
 		lib.callbacks:Fire("ResCast_Started", casterGUID, targetGUID, resCasterInfo[casterGUID], GetCallbackTargetInfo(targetGUID, casterGUID))
 
-		if fastestTargetInfo then
-			lib.callbacks:Fire("FastestRes_Changed", fastestTargetInfo.targetGUID, fastestTargetInfo)
-		end
+		FireFastestResChanged(fastestTargetInfo)
 	elseif resType == "MASS" then
 		lib.callbacks:Fire("MassResCast_Started", casterGUID, massResCasterInfo[casterGUID])
 
-		if fastestTargetInfo then
-			for _, targetInfo in pairs(fastestTargetInfo) do
-				lib.callbacks:Fire("FastestRes_Changed", targetInfo.targetGUID, targetInfo)
-			end
-		end
+		FireFastestResChangedList(fastestTargetInfo)
 	end
 end
 
@@ -1261,7 +1275,7 @@ end
 -- first observed as UNKNOWN. Match either name form against the event unitID,
 -- then move only that caster's staged entry to the real target GUID and notify
 -- consumers.
-function lib:INCOMING_RESURRECT_CHANGED(_, targetID)
+local function INCOMING_RESURRECT_CHANGED(targetID)
 	local targetGUID = UnitGUID(targetID)
 	if not targetGUID then return end
 
@@ -1288,7 +1302,7 @@ end
 -- they target the player, provide the caster as name or name-realm, may come
 -- from a visible nearby caster, and do not necessarily give the same event
 -- sequence as group spellcast tracking.
-function lib:RESURRECT_REQUEST(_, inviterName)
+local function RESURRECT_REQUEST(inviterName)
 	if IsInInstance() then return end
 	if InCombatLockdown() or UnitAffectingCombat("player") then return end
 
@@ -1304,20 +1318,11 @@ function lib:RESURRECT_REQUEST(_, inviterName)
 
 			local targetGUID = PLAYER_GUID
 
-			resCasterInfo[casterGUID] = resCasterInfo[casterGUID] or {}
-			resTargetInfo[targetGUID] = resTargetInfo[targetGUID] or {}
-			resTargetInfo[targetGUID].targetGUID = targetGUID
-			resTargetInfo[targetGUID][casterGUID] = resTargetInfo[targetGUID][casterGUID] or {}
-
-			ApplySingleCastInfo(resCasterInfo[casterGUID], resTargetInfo[targetGUID][casterGUID], casterGUID, targetGUID, castInfo)
-
+			local casterInfo = StoreSingleCastInfo(casterGUID, targetGUID, castInfo)
 			local targetInfo = UpdateFastestCasterGUID(targetGUID)
 
-			lib.callbacks:Fire("ResCast_Started", casterGUID, targetGUID, resCasterInfo[casterGUID], GetCallbackTargetInfo(targetGUID, casterGUID))
-
-			if targetInfo then
-				lib.callbacks:Fire("FastestRes_Changed", targetInfo.targetGUID, targetInfo)
-			end
+			lib.callbacks:Fire("ResCast_Started", casterGUID, targetGUID, casterInfo, GetCallbackTargetInfo(targetGUID, casterGUID))
+			FireFastestResChanged(targetInfo)
 
 			local delay = castInfo.endTime - GetTime()
 
@@ -1339,14 +1344,14 @@ end
 -- Terminal callbacks fire before cleanup so consumers can still inspect the
 -- cast that just ended. Cleanup happens immediately afterward; any resulting
 -- fastest-caster changes are then reported separately.
-function lib:UNIT_SPELLCAST_STOP(_, unitID, castGUID, spellID)
+local function UNIT_SPELLCAST_STOP(unitID, castGUID, spellID)
 	local casterGUID = UnitGUID(unitID)
 	if not casterGUID then return end
 
 	if SINGLE_TARGET_RES_SPELLS[spellID] then
 		local casterInfo = resCasterInfo[casterGUID]
 		if not casterInfo then return end
-		if casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+		if not CastGUIDMatches(casterInfo, castGUID) then return end
 
 		local targetGUID = casterInfo.targetGUID or UNKNOWN_TARGET_GUID
 		local callbackCasterInfo = NormalizeCallbackTable(casterInfo)
@@ -1356,23 +1361,17 @@ function lib:UNIT_SPELLCAST_STOP(_, unitID, castGUID, spellID)
 
 		local _, _, changedTargetInfo = RemoveSingleResCast(casterGUID, targetGUID, true, false)
 
-		if changedTargetInfo then
-			lib.callbacks:Fire("FastestRes_Changed", changedTargetInfo.targetGUID, changedTargetInfo)
-		end
+		FireFastestResChanged(changedTargetInfo)
 	elseif MASS_RES_SPELLS[spellID] then
 		local casterInfo = massResCasterInfo[casterGUID]
 		if not casterInfo then return end
-		if casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+		if not CastGUIDMatches(casterInfo, castGUID) then return end
 
 		lib.callbacks:Fire("MassResCast_Stopped", casterGUID, NormalizeCallbackTable(casterInfo))
 
 		local _, changedTargetInfo = RemoveMassResCast(casterGUID, true)
 
-		if changedTargetInfo then
-			for _, targetInfo in pairs(changedTargetInfo) do
-				lib.callbacks:Fire("FastestRes_Changed", targetInfo.targetGUID, targetInfo)
-			end
-		end
+		FireFastestResChangedList(changedTargetInfo)
 	end
 end
 
@@ -1383,7 +1382,7 @@ end
 -- against addressable group units. Known targets are then watched until
 -- UNIT_HEALTH can fire ResTargetGUID_IsAlive; UNKNOWN targets are cleaned up
 -- after the callback because there is no real GUID to watch.
-function lib:UNIT_SPELLCAST_SUCCEEDED(_, unitID, castGUID, spellID)
+local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 	local casterGUID = UnitGUID(unitID)
 	if not casterGUID then return end
 
@@ -1391,7 +1390,7 @@ function lib:UNIT_SPELLCAST_SUCCEEDED(_, unitID, castGUID, spellID)
 		local casterInfo = resCasterInfo[casterGUID]
 		local wasTracked = casterInfo ~= nil
 
-		if casterInfo and casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+		if casterInfo and not CastGUIDMatches(casterInfo, castGUID) then return end
 
 		local targetName
 
@@ -1412,15 +1411,10 @@ function lib:UNIT_SPELLCAST_SUCCEEDED(_, unitID, castGUID, spellID)
 				spellID = spellID,
 			}
 
-			resCasterInfo[casterGUID] = resCasterInfo[casterGUID] or {}
-			resTargetInfo[targetGUID] = resTargetInfo[targetGUID] or {}
-			resTargetInfo[targetGUID].targetGUID = targetGUID
-			resTargetInfo[targetGUID][casterGUID] = resTargetInfo[targetGUID][casterGUID] or {}
-
-			ApplySingleCastInfo(resCasterInfo[casterGUID], resTargetInfo[targetGUID][casterGUID], casterGUID, targetGUID, castInfo)
+			local casterInfo = StoreSingleCastInfo(casterGUID, targetGUID, castInfo)
 			UpdateFastestCasterGUID(targetGUID)
 
-			lib.callbacks:Fire("ResCast_Started", casterGUID, targetGUID, resCasterInfo[casterGUID], GetCallbackTargetInfo(targetGUID, casterGUID))
+			lib.callbacks:Fire("ResCast_Started", casterGUID, targetGUID, casterInfo, GetCallbackTargetInfo(targetGUID, casterGUID))
 		end
 
 		local finishedCasterInfo = resCasterInfo[casterGUID]
@@ -1434,7 +1428,7 @@ function lib:UNIT_SPELLCAST_SUCCEEDED(_, unitID, castGUID, spellID)
 	elseif MASS_RES_SPELLS[spellID] then
 		local casterInfo = massResCasterInfo[casterGUID]
 		if not casterInfo then return end
-		if casterInfo.castGUID and castGUID and casterInfo.castGUID ~= castGUID then return end
+		if not CastGUIDMatches(casterInfo, castGUID) then return end
 
 		MarkMassResTargets(casterGUID)
 
@@ -1448,13 +1442,15 @@ end
 -- UNIT_HEALTH is the final confirmation step for completed known targets.
 -- Cast completion only means the resurrection offer finished; the unit is not
 -- considered alive until health becomes positive.
-function lib:UNIT_HEALTH(_, unitID)
+local function UNIT_HEALTH(unitID)
 	unitID = unitID or "player"
 
 	local targetGUID = UnitGUID(unitID)
 	if not targetGUID then return end
 	if not ressedTargetGUIDs[targetGUID] then return end
-	if not UnitHealth(unitID) or UnitHealth(unitID) <= 0 then return end
+
+	local health = UnitHealth(unitID)
+	if not health or health <= 0 then return end
 
 	ressedTargetGUIDs[targetGUID] = nil
 	ClearResWaitingTargetGUID(targetGUID)
@@ -1468,13 +1464,29 @@ end
 -- A unit gains or loses a self-resurrection aura, or the player's self-res options change.
 -- Self-res availability can change through player resurrection options or
 -- through aura changes on other visible units.
-function lib:UNIT_AURA(_, unitID)
+local function UNIT_AURA(unitID)
 	if unitID == "player" then
 		UpdatePlayerSelfResOptions()
 	else
 		UpdateUnitSelfResAuras(unitID)
 	end
 end
+
+eventHandlers.INCOMING_RESURRECT_CHANGED = INCOMING_RESURRECT_CHANGED
+eventHandlers.NEUTRAL_FACTION_SELECT_RESULT = NEUTRAL_FACTION_SELECT_RESULT
+eventHandlers.PLAYER_ALIVE = UNIT_HEALTH
+eventHandlers.PLAYER_LOGIN = PLAYER_LOGIN
+eventHandlers.PLAYER_UNGHOST = UNIT_HEALTH
+eventHandlers.RESURRECT_REQUEST = RESURRECT_REQUEST
+eventHandlers.UNIT_AURA = UNIT_AURA
+eventHandlers.UNIT_HEALTH = UNIT_HEALTH
+eventHandlers.UNIT_SPELLCAST_FAILED = UNIT_SPELLCAST_STOP
+eventHandlers.UNIT_SPELLCAST_FAILED_QUIET = UNIT_SPELLCAST_STOP
+eventHandlers.UNIT_SPELLCAST_INTERRUPTED = UNIT_SPELLCAST_STOP
+eventHandlers.UNIT_SPELLCAST_SENT = UNIT_SPELLCAST_SENT
+eventHandlers.UNIT_SPELLCAST_START = UNIT_SPELLCAST_START
+eventHandlers.UNIT_SPELLCAST_STOP = UNIT_SPELLCAST_STOP
+eventHandlers.UNIT_SPELLCAST_SUCCEEDED = UNIT_SPELLCAST_SUCCEEDED
 
 -- -------------------------------------------------------------------
 -- Public APIs
