@@ -1,4 +1,4 @@
-## Interface: 120007, 50504, 38001, 20506, 11509
+## Interface: 120007, 50504, 38002, 20506, 11509
 ## Title: Lib: ResInfo-2.0
 ## Notes: Library to provide information about resurrections in your group
 ## Notes-deDE: Bibliothek zur Bereitstellung von Informationen über Wiederbelebungen in deiner Gruppe

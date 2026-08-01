@@ -145,6 +145,10 @@ local massResTargetGUIDs = {}
 -- Self-resurrection options, keyed by unit GUID, then option key.
 local selfResInfo = {}
 
+-- Player resurrection attempt reported by UNIT_SPELLCAST_SENT while waiting
+-- for UNIT_SPELLCAST_START or UNIT_SPELLCAST_SUCCEEDED to confirm its timing.
+local playerSentCastInfo
+
 -- -------------------------------------------------------------------
 -- Spell tables
 -- -------------------------------------------------------------------
@@ -683,12 +687,13 @@ end
 -- has full cast timing, while observed casts may expose only name or name-realm,
 -- or no target at all. Resolve those names against addressable group units and
 -- merge partial data without overwriting better data from earlier events.
-local function PopulateSingleResInfo(unitID, casterGUID, castInfo)
+local function PopulateSingleResInfo(unitID, casterGUID, castInfo, sentTargetGUID)
 	local existingCasterInfo = resCasterInfo[casterGUID]
 	local existingTargetGUID = existingCasterInfo and existingCasterInfo.targetGUID
 
 	local targetName = UnitSpellTargetName(unitID)
-	local targetGUID = UnitGUID(targetName)
+	local targetGUID = sentTargetGUID
+	or UnitGUID(targetName)
 	or ResolveGroupUnitName(targetName)
 	or existingTargetGUID
 	or UNKNOWN_TARGET_GUID
@@ -748,15 +753,19 @@ end
 -- Identify whether the current visible cast is a resurrection spell and
 -- populate the matching state tables. Returns enough context for event
 -- handlers to fire the correct callbacks without re-reading state.
-local function PopulateResInfoTables(unitID)
+local function PopulateResInfoTables(unitID, castGUID, spellID, sentTargetGUID)
 	local casterGUID = UnitGUID(unitID)
 	if not casterGUID then return end
 
 	local castInfo = GetCurrentCastInfo(unitID)
 	if not castInfo then return end
+	if spellID and castInfo.spellID ~= spellID then return end
+
+	castInfo.castGUID = castGUID or castInfo.castGUID
+	castInfo.spellID = spellID or castInfo.spellID
 
 	if SINGLE_TARGET_RES_SPELLS[castInfo.spellID] then
-		local targetGUID, fastestTargetInfo = PopulateSingleResInfo(unitID, casterGUID, castInfo)
+		local targetGUID, fastestTargetInfo = PopulateSingleResInfo(unitID, casterGUID, castInfo, sentTargetGUID)
 		return "SINGLE", casterGUID, targetGUID, fastestTargetInfo
 	elseif MASS_RES_SPELLS[castInfo.spellID] then
 		local fastestTargetInfo = PopulateMassResInfo(casterGUID, castInfo)
@@ -764,30 +773,33 @@ local function PopulateResInfoTables(unitID)
 	end
 end
 
--- Build cast info for the player's UNIT_SPELLCAST_SENT path.
+-- Build pending identity for the player's UNIT_SPELLCAST_SENT path.
 --
 -- UNIT_SPELLCAST_SENT is authoritative for the player target, cast GUID, and
--- spell ID. UnitCastingInfo supplies the accurate timing and icon when the cast
--- is visible, including hasted cast times. If Blizzard has not exposed timing
--- yet, fall back to the event values so instant casts and odd event ordering
--- still produce a complete, minimal cast table.
-local function GetPlayerSentCastInfo(unitID, castGUID, spellID)
-	local castInfo = GetCurrentCastInfo(unitID)
-
-	if not castInfo or castInfo.spellID ~= spellID then
+-- spell ID, but it only reports an attempted cast. Non-instant timing is read
+-- from UnitCastingInfo after UNIT_SPELLCAST_START; casts which reach SUCCEEDED
+-- without START are handled as instant casts.
+local function GetPlayerSentCastInfo(targetID, castGUID, spellID)
+	if SINGLE_TARGET_RES_SPELLS[spellID] then
 		return {
 			castGUID = castGUID,
-			castTime = 0,
-			endTime = GetTime(),
+			spellID = spellID,
+			targetGUID = UnitGUID(targetID)
+			or ResolveGroupUnitName(targetID)
+			or UNKNOWN_TARGET_GUID,
+		}
+	elseif MASS_RES_SPELLS[spellID] then
+		return {
+			castGUID = castGUID,
 			spellID = spellID,
 		}
 	end
+end
 
-	-- Prefer the event values for identity, while keeping UnitCastingInfo timing.
-	castInfo.castGUID = castGUID or castInfo.castGUID
-	castInfo.spellID = spellID
+local function PlayerSentCastMatches(castInfo, castGUID, spellID)
+	if not castInfo or castInfo.spellID ~= spellID then return end
 
-	return castInfo
+	return not castInfo.castGUID or not castGUID or castInfo.castGUID == castGUID
 end
 
 -- Move one caster's unresolved target entry to its resolved GUID.
@@ -900,8 +912,8 @@ end
 -- Normal stopped/finished paths remove UNKNOWN entries immediately after their
 -- terminal callbacks fire. This fallback exists for missed or unusual event
 -- ordering where an unresolved cast never receives a terminal spellcast event.
--- The timeout is measured from the tracked endTime. If endTime came only from
--- UNIT_SPELLCAST_SENT, ten seconds still covers the longest known res cast.
+-- The timeout is measured from the tracked endTime. Ten seconds covers unusual
+-- event ordering after the longest known resurrection cast should have ended.
 local function RemoveExpiredUnknownTargetInfo()
 	local targetInfo = resTargetInfo[UNKNOWN_TARGET_GUID]
 	if not targetInfo then return end
@@ -1193,6 +1205,7 @@ local function PLAYER_LOGIN()
 	wipe(ressedTargetGUIDs)
 	wipe(resWaitingExpireTimes)
 	wipe(selfResInfo)
+	playerSentCastInfo = nil
 
 	RegisterEvents()
 
@@ -1218,46 +1231,33 @@ end
 
 -- Player spell targeting is available before the cast starts.
 --
--- For the player, UNIT_SPELLCAST_SENT is the authoritative path: it gives the
--- target token, cast GUID, and spell ID. UnitCastingInfo is read immediately to
--- fill accurate timing/icon data when available, so player casts do not depend
--- on a later UNIT_SPELLCAST_START.
+-- Store only authoritative SENT identity here. UNIT_SPELLCAST_SENT reports an
+-- attempted cast, so callbacks wait for START to provide non-instant timing or
+-- for SUCCEEDED to confirm an instant cast.
 local function UNIT_SPELLCAST_SENT(unitID, targetID, castGUID, spellID)
-	local castInfo = GetPlayerSentCastInfo(unitID, castGUID, spellID)
+	if unitID ~= "player" then return end
 
-	if SINGLE_TARGET_RES_SPELLS[spellID] then
-		local targetGUID = UnitGUID(targetID) or UNKNOWN_TARGET_GUID
-
-		local casterInfo = StoreSingleCastInfo(PLAYER_GUID, targetGUID, castInfo)
-		local fastestTargetInfo = UpdateFastestCasterGUID(targetGUID)
-
-		lib.callbacks:Fire("ResCast_Started", PLAYER_GUID, targetGUID, casterInfo, GetCallbackTargetInfo(targetGUID, PLAYER_GUID))
-		FireFastestResChanged(fastestTargetInfo)
-	elseif MASS_RES_SPELLS[spellID] then
-		massResCasterInfo[PLAYER_GUID] = massResCasterInfo[PLAYER_GUID] or {}
-
-		ApplyMassCastInfo(massResCasterInfo[PLAYER_GUID], PLAYER_GUID, castInfo)
-		SnapshotMassResTargets(PLAYER_GUID)
-
-		local fastestTargetInfo = UpdateAllFastestCasterGUIDs()
-
-		lib.callbacks:Fire("MassResCast_Started", PLAYER_GUID, massResCasterInfo[PLAYER_GUID])
-
-		FireFastestResChangedList(fastestTargetInfo)
-	end
+	playerSentCastInfo = GetPlayerSentCastInfo(targetID, castGUID, spellID)
 end
 
--- Observed units usually enter tracking here.
+-- Non-instant resurrection casts enter active tracking here.
 --
--- For non-player casters, this is often the first event where we can see the
--- caster GUID, spell ID, cast GUID, timing, icon, and sometimes target name.
--- That target value may be either name or name-realm.
--- Player casts are handled by UNIT_SPELLCAST_SENT to avoid duplicate started
--- callbacks and to trust the player-specific target data from that event.
-local function UNIT_SPELLCAST_START(unitID)
-	if unitID == "player" then return end
+-- For the player, use the target captured by UNIT_SPELLCAST_SENT while reading
+-- actual timing and texture data from UnitCastingInfo. For observed casters,
+-- resolve the target from whatever Blizzard currently exposes.
+local function UNIT_SPELLCAST_START(unitID, castGUID, spellID)
+	local sentTargetGUID
 
-	local resType, casterGUID, targetGUID, fastestTargetInfo = PopulateResInfoTables(unitID)
+	if unitID == "player" and PlayerSentCastMatches(playerSentCastInfo, castGUID, spellID) then
+		sentTargetGUID = playerSentCastInfo.targetGUID
+	end
+
+	local resType, casterGUID, targetGUID, fastestTargetInfo = PopulateResInfoTables(unitID, castGUID, spellID, sentTargetGUID)
+	if not resType then return end
+
+	if unitID == "player" then
+		playerSentCastInfo = nil
+	end
 
 	if resType == "SINGLE" and targetGUID then
 		lib.callbacks:Fire("ResCast_Started", casterGUID, targetGUID, resCasterInfo[casterGUID], GetCallbackTargetInfo(targetGUID, casterGUID))
@@ -1348,6 +1348,10 @@ local function UNIT_SPELLCAST_STOP(unitID, castGUID, spellID)
 	local casterGUID = UnitGUID(unitID)
 	if not casterGUID then return end
 
+	if unitID == "player" and PlayerSentCastMatches(playerSentCastInfo, castGUID, spellID) then
+		playerSentCastInfo = nil
+	end
+
 	if SINGLE_TARGET_RES_SPELLS[spellID] then
 		local casterInfo = resCasterInfo[casterGUID]
 		if not casterInfo then return end
@@ -1386,6 +1390,13 @@ local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 	local casterGUID = UnitGUID(unitID)
 	if not casterGUID then return end
 
+	local sentCastInfo
+
+	if unitID == "player" and PlayerSentCastMatches(playerSentCastInfo, castGUID, spellID) then
+		sentCastInfo = playerSentCastInfo
+		playerSentCastInfo = nil
+	end
+
 	if SINGLE_TARGET_RES_SPELLS[spellID] then
 		local casterInfo = resCasterInfo[casterGUID]
 		local wasTracked = casterInfo ~= nil
@@ -1398,7 +1409,8 @@ local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 			targetName = UnitSpellTargetName(unitID)
 		end
 
-		local targetGUID = wasTracked and (casterInfo.targetGUID or UNKNOWN_TARGET_GUID)
+		local targetGUID = sentCastInfo and sentCastInfo.targetGUID
+		or (wasTracked and (casterInfo.targetGUID or UNKNOWN_TARGET_GUID))
 		or UnitGUID(targetName)
 		or ResolveGroupUnitName(targetName)
 		or UNKNOWN_TARGET_GUID
