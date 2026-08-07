@@ -42,6 +42,7 @@ AddOns should embed the child folder:
 externals:
   Libs/LibResInfo-2.0:
     url: https://github.com/Myrroddin/libresinfo-2.0.git/LibResInfo-2.0
+    curse-slug: libresinfo-2-0
 ```
 
 ### TOC
