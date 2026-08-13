@@ -1,16 +1,13 @@
 # description of this workflow, can be anything you want
 name: Package and release
 
-# we need to let GitHub know _when_ we want to release, typically only when we create a new tag.
-# this will target only tags, and not all pushes to the master branch.
-# this part can be heavily customized to your liking, like targeting only tags that match a certain word,
-# other branches or even pullrequests.
+# we need to let GitHub know _when_ we want to release.
+# this is typically only when we create a new tag.
+# make sure your tags are annotated!
 on:
-    push:
-      # branches: # uncomment this line to make alpha builds
-      # - master # uncomment this line to make alpha builds
-      tags:
-        - '**'
+  push:
+    tags:
+      - '**'
 
 # a workflow is built up as jobs, and within these jobs are steps
 jobs:
@@ -38,6 +35,6 @@ jobs:
         with:
           fetch-depth: 0  # gets entire git history, needed for automatic changelogs
 
-      # once cloned, we just run the GitHub Action for the packager project
-      - name: Package and release for retail
+      # once cloned, we just run the GitHub Action
+      - name: Package and release
         uses: BigWigsMods/packager@v2
