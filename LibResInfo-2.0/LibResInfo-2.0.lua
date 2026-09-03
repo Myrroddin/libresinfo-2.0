@@ -606,6 +606,11 @@ local function ResolvePublicUnitArg(unit)
 		return unitGUID
 	end
 
+	unitGUID = ResolveGroupUnitName(unit)
+	if unitGUID then
+		return unitGUID
+	end
+
 	if IsUnitGUID(unit) then
 		return unit
 	end
@@ -689,13 +694,15 @@ end
 -- merge partial data without overwriting better data from earlier events.
 local function PopulateSingleResInfo(unitID, casterGUID, castInfo, sentTargetGUID)
 	local existingCasterInfo = resCasterInfo[casterGUID]
-	local existingTargetGUID = existingCasterInfo and existingCasterInfo.targetGUID
+	local existingTargetGUID = existingCasterInfo
+	and IsKnownTargetGUID(existingCasterInfo.targetGUID)
+	and existingCasterInfo.targetGUID
 
 	local targetName = UnitSpellTargetName(unitID)
 	local targetGUID = sentTargetGUID
-	or UnitGUID(targetName)
-	or ResolveGroupUnitName(targetName)
 	or existingTargetGUID
+	or (targetName and UnitGUID(targetName))
+	or ResolveGroupUnitName(targetName)
 	or UNKNOWN_TARGET_GUID
 
 	StoreSingleCastInfo(casterGUID, targetGUID, castInfo)
@@ -785,8 +792,7 @@ local function GetPlayerSentCastInfo(targetID, castGUID, spellID)
 			castGUID = castGUID,
 			spellID = spellID,
 			targetGUID = UnitGUID(targetID)
-			or ResolveGroupUnitName(targetID)
-			or UNKNOWN_TARGET_GUID,
+			or ResolveGroupUnitName(targetID),
 		}
 	elseif MASS_RES_SPELLS[spellID] then
 		return {
@@ -1403,17 +1409,25 @@ local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 
 		if casterInfo and not CastGUIDMatches(casterInfo, castGUID) then return end
 
-		local targetName
-
-		if not wasTracked then
-			targetName = UnitSpellTargetName(unitID)
-		end
-
-		local targetGUID = sentCastInfo and sentCastInfo.targetGUID
-		or (wasTracked and (casterInfo.targetGUID or UNKNOWN_TARGET_GUID))
-		or UnitGUID(targetName)
+		local sentTargetGUID = sentCastInfo and sentCastInfo.targetGUID
+		local trackedTargetGUID = casterInfo
+		and IsKnownTargetGUID(casterInfo.targetGUID)
+		and casterInfo.targetGUID
+		local targetName = not sentTargetGUID
+		and not trackedTargetGUID
+		and UnitSpellTargetName(unitID)
+		local targetGUID = sentTargetGUID
+		or trackedTargetGUID
+		or (targetName and UnitGUID(targetName))
 		or ResolveGroupUnitName(targetName)
 		or UNKNOWN_TARGET_GUID
+
+		if wasTracked and casterInfo.targetGUID == UNKNOWN_TARGET_GUID and IsKnownTargetGUID(targetGUID) then
+			casterInfo.targetGUID = targetGUID
+			ReplaceUnknownTargetGUID(targetGUID, casterGUID)
+
+			lib.callbacks:Fire("ResTargetGUID_Resolved", casterGUID, targetGUID, casterInfo, resTargetInfo[targetGUID])
+		end
 
 		if not wasTracked then
 			local castInfo = {
