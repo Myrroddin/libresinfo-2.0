@@ -27,7 +27,7 @@ assert(LibStub("CallbackHandler-1.0", true), "LibResInfo-2.0 requires CallbackHa
 ---@field RegisterCallback fun(target: table, eventName: LibResInfoCallbackName, method: string, arg?: any)
 ---@field UnregisterCallback fun(target: table, eventName: LibResInfoCallbackName)
 ---@field UnregisterAllResInfoCallbacks fun(target: table)
-local lib = LibStub:NewLibrary("LibResInfo-2.0", 1)
+local lib = LibStub:NewLibrary("LibResInfo-2.0", 2)
 if not lib then return end
 
 -- Callback names accepted by RegisterCallback and UnregisterCallback.
