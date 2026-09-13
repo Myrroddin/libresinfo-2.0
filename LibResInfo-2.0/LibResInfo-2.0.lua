@@ -369,6 +369,22 @@ local function IsKnownTargetGUID(targetGUID)
 	return targetGUID and targetGUID ~= UNKNOWN_TARGET_GUID
 end
 
+-- Self-res spells and effects are present while their unit is alive, but only
+-- represent a resurrection cast when used by or on a dead unit. Require a
+-- resolvable dead target before entering the normal resurrection lifecycle;
+-- aura availability and consumption are tracked separately.
+local function IsValidResurrectionTarget(spellID, targetGUID)
+	if not SELF_RES_AURAS[spellID] then
+		return true
+	end
+
+	if not IsKnownTargetGUID(targetGUID) then return false end
+
+	local unitID = UnitTokenFromGUID(targetGUID)
+
+	return unitID and UnitIsDeadOrGhost(unitID)
+end
+
 -- Compare a name-only API or event value against both name forms exposed by
 -- a known unitID. Blizzard does not consistently document whether such values
 -- include the realm suffix, so both name and name-realm must be accepted.
@@ -718,6 +734,7 @@ local function PopulateSingleResInfo(unitID, casterGUID, castInfo, sentTargetGUI
 	or (targetName and UnitGUID(targetName))
 	or ResolveGroupUnitName(targetName)
 	or UNKNOWN_TARGET_GUID
+	if not IsValidResurrectionTarget(castInfo.spellID, targetGUID) then return end
 
 	StoreSingleCastInfo(casterGUID, targetGUID, castInfo)
 
@@ -787,6 +804,8 @@ local function PopulateResInfoTables(unitID, castGUID, spellID, sentTargetGUID)
 
 	if SINGLE_TARGET_RES_SPELLS[castInfo.spellID] then
 		local targetGUID, fastestTargetInfo = PopulateSingleResInfo(unitID, casterGUID, castInfo, sentTargetGUID)
+		if not targetGUID then return end
+
 		return "SINGLE", casterGUID, targetGUID, fastestTargetInfo
 	elseif MASS_RES_SPELLS[castInfo.spellID] then
 		local fastestTargetInfo = PopulateMassResInfo(casterGUID, castInfo)
@@ -1488,6 +1507,11 @@ local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 		or (targetName and UnitGUID(targetName))
 		or ResolveGroupUnitName(targetName)
 		or UNKNOWN_TARGET_GUID
+
+		if not wasTracked and not IsValidResurrectionTarget(spellID, targetGUID) then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
 
 		if wasTracked and casterInfo.targetGUID == UNKNOWN_TARGET_GUID and IsKnownTargetGUID(targetGUID) then
 			casterInfo.targetGUID = targetGUID
