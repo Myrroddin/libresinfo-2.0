@@ -146,7 +146,7 @@ Available callbacks:
 
 ## Documentation
 
-See [API.md](./API.md) for complete API and callback documentation.
+See [API.md](https://github.com/Myrroddin/libresinfo-2.0/blob/main/API.md) for complete API and callback documentation.
 
 ## Bug Reports
 

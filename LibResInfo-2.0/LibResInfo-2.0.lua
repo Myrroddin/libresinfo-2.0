@@ -27,7 +27,7 @@ assert(LibStub("CallbackHandler-1.0", true), "LibResInfo-2.0 requires CallbackHa
 ---@field RegisterCallback fun(target: table, eventName: LibResInfoCallbackName, method: string, arg?: any)
 ---@field UnregisterCallback fun(target: table, eventName: LibResInfoCallbackName)
 ---@field UnregisterAllResInfoCallbacks fun(target: table)
-local lib = LibStub:NewLibrary("LibResInfo-2.0", 2)
+local lib = LibStub:NewLibrary("LibResInfo-2.0", 3)
 if not lib then return end
 
 -- Callback names accepted by RegisterCallback and UnregisterCallback.
@@ -148,6 +148,11 @@ local selfResInfo = {}
 -- Player resurrection attempt reported by UNIT_SPELLCAST_SENT while waiting
 -- for UNIT_SPELLCAST_START or UNIT_SPELLCAST_SUCCEEDED to confirm its timing.
 local playerSentCastInfo
+
+-- Cast GUIDs which have already reached a success or failure outcome. Blizzard
+-- may report more than one terminal event for the same physical cast; retaining
+-- the GUID prevents a late duplicate from recreating state after cleanup.
+local terminalCastGUIDs = {}
 
 -- -------------------------------------------------------------------
 -- Spell tables
@@ -287,7 +292,6 @@ local events = {
 	["UNIT_SPELLCAST_INTERRUPTED"]	= true,
 	["UNIT_SPELLCAST_SENT"]			= true,
 	["UNIT_SPELLCAST_START"]		= true,
-	["UNIT_SPELLCAST_STOP"]			= true,
 	["UNIT_SPELLCAST_SUCCEEDED"]	= true,
 }
 
@@ -326,6 +330,16 @@ end
 -- reject an event which explicitly belongs to a different tracked cast.
 local function CastGUIDMatches(casterInfo, castGUID)
 	return not casterInfo.castGUID or not castGUID or casterInfo.castGUID == castGUID
+end
+
+local function IsTerminalCastGUID(castGUID)
+	return castGUID and terminalCastGUIDs[castGUID]
+end
+
+local function MarkTerminalCastGUID(castGUID)
+	if castGUID then
+		terminalCastGUIDs[castGUID] = true
+	end
 end
 
 -- UnitCastingInfo returns cast times in milliseconds. LibResInfo exposes
@@ -1170,10 +1184,12 @@ local function FinishExternalResCast(casterGUID, targetGUID)
 	local casterInfo = resCasterInfo[casterGUID]
 	if not casterInfo then return end
 	if casterInfo.targetGUID ~= targetGUID then return end
+	if IsTerminalCastGUID(casterInfo.castGUID) then return end
 
 	local finishedCasterInfo = resCasterInfo[casterGUID]
 	local finishedTargetInfo = GetCallbackTargetInfo(targetGUID, casterGUID)
 
+	MarkTerminalCastGUID(casterInfo.castGUID)
 	MarkRessedTargetGUID(targetGUID)
 
 	lib.callbacks:Fire("ResCast_Finished", casterGUID, targetGUID, NormalizeCallbackTable(finishedCasterInfo), finishedTargetInfo)
@@ -1211,6 +1227,7 @@ local function PLAYER_LOGIN()
 	wipe(ressedTargetGUIDs)
 	wipe(resWaitingExpireTimes)
 	wipe(selfResInfo)
+	wipe(terminalCastGUIDs)
 	playerSentCastInfo = nil
 
 	RegisterEvents()
@@ -1243,7 +1260,14 @@ end
 local function UNIT_SPELLCAST_SENT(unitID, targetID, castGUID, spellID)
 	if unitID ~= "player" then return end
 
-	playerSentCastInfo = GetPlayerSentCastInfo(targetID, castGUID, spellID)
+	local sentCastInfo = GetPlayerSentCastInfo(targetID, castGUID, spellID)
+
+	if sentCastInfo and IsTerminalCastGUID(sentCastInfo.castGUID) then
+		playerSentCastInfo = nil
+		return
+	end
+
+	playerSentCastInfo = sentCastInfo
 end
 
 -- Non-instant resurrection casts enter active tracking here.
@@ -1252,13 +1276,27 @@ end
 -- actual timing and texture data from UnitCastingInfo. For observed casters,
 -- resolve the target from whatever Blizzard currently exposes.
 local function UNIT_SPELLCAST_START(unitID, castGUID, spellID)
+	if not SINGLE_TARGET_RES_SPELLS[spellID] and not MASS_RES_SPELLS[spellID] then return end
+	if IsTerminalCastGUID(castGUID) then return end
+
+	local casterGUID = UnitGUID(unitID)
+	if not casterGUID then return end
+
+	local activeCasterInfo = resCasterInfo[casterGUID] or massResCasterInfo[casterGUID]
+	if activeCasterInfo then
+		-- A repeated START for the active cast must not announce it twice. A
+		-- different GUID is a late or out-of-order event and must not replace the
+		-- newer active cast stored for this caster.
+		return
+	end
+
 	local sentTargetGUID
 
 	if unitID == "player" and PlayerSentCastMatches(playerSentCastInfo, castGUID, spellID) then
 		sentTargetGUID = playerSentCastInfo.targetGUID
 	end
 
-	local resType, casterGUID, targetGUID, fastestTargetInfo = PopulateResInfoTables(unitID, castGUID, spellID, sentTargetGUID)
+	local resType, _, targetGUID, fastestTargetInfo = PopulateResInfoTables(unitID, castGUID, spellID, sentTargetGUID)
 	if not resType then return end
 
 	if unitID == "player" then
@@ -1321,6 +1359,10 @@ local function RESURRECT_REQUEST(inviterName)
 
 			local castInfo = GetCurrentCastInfo(unitID)
 			if not castInfo or not SINGLE_TARGET_RES_SPELLS[castInfo.spellID] then return end
+			if IsTerminalCastGUID(castInfo.castGUID) then return end
+
+			local activeCasterInfo = resCasterInfo[casterGUID] or massResCasterInfo[casterGUID]
+			if activeCasterInfo then return end
 
 			local targetGUID = PLAYER_GUID
 
@@ -1345,12 +1387,17 @@ local function RESURRECT_REQUEST(inviterName)
 	end
 end
 
--- A resurrection cast is interrupted, fails, or is otherwise stopped before completion.
+-- A resurrection cast is interrupted or fails before completion.
 --
 -- Terminal callbacks fire before cleanup so consumers can still inspect the
 -- cast that just ended. Cleanup happens immediately afterward; any resulting
 -- fastest-caster changes are then reported separately.
-local function UNIT_SPELLCAST_STOP(unitID, castGUID, spellID)
+-- UNIT_SPELLCAST_STOP is deliberately not registered: it reports that the cast
+-- bar ended, not whether the spell succeeded or failed.
+local function UNIT_SPELLCAST_FAILED(unitID, castGUID, spellID)
+	if not SINGLE_TARGET_RES_SPELLS[spellID] and not MASS_RES_SPELLS[spellID] then return end
+	if IsTerminalCastGUID(castGUID) then return end
+
 	local casterGUID = UnitGUID(unitID)
 	if not casterGUID then return end
 
@@ -1360,13 +1407,20 @@ local function UNIT_SPELLCAST_STOP(unitID, castGUID, spellID)
 
 	if SINGLE_TARGET_RES_SPELLS[spellID] then
 		local casterInfo = resCasterInfo[casterGUID]
-		if not casterInfo then return end
-		if not CastGUIDMatches(casterInfo, castGUID) then return end
+		if not casterInfo then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
+		if not CastGUIDMatches(casterInfo, castGUID) then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
 
 		local targetGUID = casterInfo.targetGUID or UNKNOWN_TARGET_GUID
 		local callbackCasterInfo = NormalizeCallbackTable(casterInfo)
 		local callbackTargetInfo = GetCallbackTargetInfo(targetGUID, casterGUID)
 
+		MarkTerminalCastGUID(castGUID or casterInfo.castGUID)
 		lib.callbacks:Fire("ResCast_Stopped", casterGUID, targetGUID, callbackCasterInfo, callbackTargetInfo)
 
 		local _, _, changedTargetInfo = RemoveSingleResCast(casterGUID, targetGUID, true, false)
@@ -1374,9 +1428,16 @@ local function UNIT_SPELLCAST_STOP(unitID, castGUID, spellID)
 		FireFastestResChanged(changedTargetInfo)
 	elseif MASS_RES_SPELLS[spellID] then
 		local casterInfo = massResCasterInfo[casterGUID]
-		if not casterInfo then return end
-		if not CastGUIDMatches(casterInfo, castGUID) then return end
+		if not casterInfo then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
+		if not CastGUIDMatches(casterInfo, castGUID) then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
 
+		MarkTerminalCastGUID(castGUID or casterInfo.castGUID)
 		lib.callbacks:Fire("MassResCast_Stopped", casterGUID, NormalizeCallbackTable(casterInfo))
 
 		local _, changedTargetInfo = RemoveMassResCast(casterGUID, true)
@@ -1393,6 +1454,9 @@ end
 -- UNIT_HEALTH can fire ResTargetGUID_IsAlive; UNKNOWN targets are cleaned up
 -- after the callback because there is no real GUID to watch.
 local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
+	if not SINGLE_TARGET_RES_SPELLS[spellID] and not MASS_RES_SPELLS[spellID] then return end
+	if IsTerminalCastGUID(castGUID) then return end
+
 	local casterGUID = UnitGUID(unitID)
 	if not casterGUID then return end
 
@@ -1407,7 +1471,10 @@ local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 		local casterInfo = resCasterInfo[casterGUID]
 		local wasTracked = casterInfo ~= nil
 
-		if casterInfo and not CastGUIDMatches(casterInfo, castGUID) then return end
+		if casterInfo and not CastGUIDMatches(casterInfo, castGUID) then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
 
 		local sentTargetGUID = sentCastInfo and sentCastInfo.targetGUID
 		local trackedTargetGUID = casterInfo
@@ -1446,6 +1513,7 @@ local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 		local finishedCasterInfo = resCasterInfo[casterGUID]
 		local finishedTargetInfo = GetCallbackTargetInfo(targetGUID, casterGUID)
 
+		MarkTerminalCastGUID(castGUID or (finishedCasterInfo and finishedCasterInfo.castGUID))
 		MarkRessedTargetGUID(targetGUID)
 
 		lib.callbacks:Fire("ResCast_Finished", casterGUID, targetGUID, NormalizeCallbackTable(finishedCasterInfo), finishedTargetInfo)
@@ -1453,9 +1521,16 @@ local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID)
 		RemoveSingleResCast(casterGUID, targetGUID, false, false)
 	elseif MASS_RES_SPELLS[spellID] then
 		local casterInfo = massResCasterInfo[casterGUID]
-		if not casterInfo then return end
-		if not CastGUIDMatches(casterInfo, castGUID) then return end
+		if not casterInfo then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
+		if not CastGUIDMatches(casterInfo, castGUID) then
+			MarkTerminalCastGUID(castGUID)
+			return
+		end
 
+		MarkTerminalCastGUID(castGUID or casterInfo.castGUID)
 		MarkMassResTargets(casterGUID)
 
 		lib.callbacks:Fire("MassResCast_Finished", casterGUID, NormalizeCallbackTable(massResCasterInfo[casterGUID]))
@@ -1506,12 +1581,11 @@ eventHandlers.PLAYER_UNGHOST = UNIT_HEALTH
 eventHandlers.RESURRECT_REQUEST = RESURRECT_REQUEST
 eventHandlers.UNIT_AURA = UNIT_AURA
 eventHandlers.UNIT_HEALTH = UNIT_HEALTH
-eventHandlers.UNIT_SPELLCAST_FAILED = UNIT_SPELLCAST_STOP
-eventHandlers.UNIT_SPELLCAST_FAILED_QUIET = UNIT_SPELLCAST_STOP
-eventHandlers.UNIT_SPELLCAST_INTERRUPTED = UNIT_SPELLCAST_STOP
+eventHandlers.UNIT_SPELLCAST_FAILED = UNIT_SPELLCAST_FAILED
+eventHandlers.UNIT_SPELLCAST_FAILED_QUIET = UNIT_SPELLCAST_FAILED
+eventHandlers.UNIT_SPELLCAST_INTERRUPTED = UNIT_SPELLCAST_FAILED
 eventHandlers.UNIT_SPELLCAST_SENT = UNIT_SPELLCAST_SENT
 eventHandlers.UNIT_SPELLCAST_START = UNIT_SPELLCAST_START
-eventHandlers.UNIT_SPELLCAST_STOP = UNIT_SPELLCAST_STOP
 eventHandlers.UNIT_SPELLCAST_SUCCEEDED = UNIT_SPELLCAST_SUCCEEDED
 
 -- -------------------------------------------------------------------

@@ -9,7 +9,7 @@
     ".pkgmeta"
   ],
   "library": ["LibStub/", "CallbackHandler-1.0/"],
-  "framexml": true,
+  "framexml": false,
 
   "flavors": [
     "classic_era",
