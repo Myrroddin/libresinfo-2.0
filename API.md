@@ -537,15 +537,16 @@ Notes
 
 ### ResCastInfo
 
-| Field      | Type      | Description                                      |
-|------------|-----------|--------------------------------------------------|
-| castGUID   | `string`  | GUID of the spellcast                            |
-| casterGUID | `string`  | GUID of the caster                               |
-| castTime   | `number`  | in seconds                                       |
-| spellID    | `integer` | EX: 2006 for Resurrection                        |
-| targetGUID | `string`  | GUID of the target or `"UNKNOWN"`                |
-| textureID  | `integer` | FileID of the spell's icon                       |
-| endTime    | `number`  | When the spellcast ends, compared to `GetTime()` |
+| Field      | Type               | Description                                             |
+|------------|--------------------|---------------------------------------------------------|
+| castBarID  | `integer` or `nil` | Retail cast-bar sequence ID; unavailable on older clients |
+| castGUID   | `string`           | GUID of the spellcast                                   |
+| casterGUID | `string`           | GUID of the caster                                      |
+| castTime   | `number`           | in seconds                                              |
+| spellID    | `integer`          | EX: 2006 for Resurrection                               |
+| targetGUID | `string`           | GUID of the target or `"UNKNOWN"`                       |
+| textureID  | `integer`          | FileID of the spell's icon                              |
+| endTime    | `number`           | When the spellcast ends, compared to `GetTime()`        |
 
 ---
 
