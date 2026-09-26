@@ -17,6 +17,7 @@ Supported clients:
 - Wrath Classic
 - Mists Classic
 - Retail
+- WoW Forever
 
 ---
 
@@ -136,7 +137,9 @@ Available callbacks:
 
 ## Notes
 
-- `targetGUID` may temporarily be `"UNKNOWN"` if Blizzard does not expose enough information to resolve the target immediately.
+- Blizzard may withhold or restrict API and event values on any supported client. LibResInfo-2.0 ignores data it cannot inspect safely rather than guessing, so an affected cast or update may be unavailable to consumers.
+- `targetGUID` may temporarily be `"UNKNOWN"` if Blizzard does not expose enough information to resolve the target immediately. This is a per-caster staging marker, not a shared target identity.
+- Listen for `ResTargetGUID_Resolved` to replace an `"UNKNOWN"` target with its resolved GUID when Blizzard later exposes it.
 - Mass resurrection spells do not expose target GUIDs.
 - Callback info tables should be treated as read-only.
 - Completed resurrection targets may enter a waiting state until their resurrection popup expires.

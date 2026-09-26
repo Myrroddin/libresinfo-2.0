@@ -539,7 +539,7 @@ Notes
 
 | Field      | Type               | Description                                             |
 |------------|--------------------|---------------------------------------------------------|
-| castBarID  | `integer` or `nil` | Retail cast-bar sequence ID; unavailable on older clients |
+| castBarID  | `integer` or `nil` | Blizzard cast-bar sequence ID, when available           |
 | castGUID   | `string`           | GUID of the spellcast                                   |
 | casterGUID | `string`           | GUID of the caster                                      |
 | castTime   | `number`           | in seconds                                              |
@@ -547,6 +547,8 @@ Notes
 | targetGUID | `string`           | GUID of the target or `"UNKNOWN"`                       |
 | textureID  | `integer`          | FileID of the spell's icon                              |
 | endTime    | `number`           | When the spellcast ends, compared to `GetTime()`        |
+
+`castBarID` is optional and is not guaranteed to exist on every supported client or for every cast. Check that the field exists before using it.
 
 ---
 

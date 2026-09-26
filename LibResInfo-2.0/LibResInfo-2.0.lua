@@ -27,7 +27,7 @@ assert(LibStub("CallbackHandler-1.0", true), "LibResInfo-2.0 requires CallbackHa
 ---@field RegisterCallback fun(target: table, eventName: LibResInfoCallbackName, method: string, arg?: any)
 ---@field UnregisterCallback fun(target: table, eventName: LibResInfoCallbackName)
 ---@field UnregisterAllResInfoCallbacks fun(target: table)
-local lib = LibStub:NewLibrary("LibResInfo-2.0", 4)
+local lib = LibStub:NewLibrary("LibResInfo-2.0", 5)
 if not lib then return end
 
 -- Callback names accepted by RegisterCallback and UnregisterCallback.
@@ -80,7 +80,8 @@ frame:RegisterEvent("PLAYER_LOGIN")
 -- -------------------------------------------------------------------
 
 local After = C_Timer.After
-local CanAccessValue = canaccessvalue
+local canaccessvalue = canaccessvalue or function() return true end
+local GetAuraDataByAuraInstanceID = C_UnitAuras.GetAuraDataByAuraInstanceID
 local GetCorpseRecoveryDelay = GetCorpseRecoveryDelay
 local GetNamePlates = C_NamePlate.GetNamePlates
 local GetNumGroupMembers = GetNumGroupMembers
@@ -92,6 +93,8 @@ local IsInGroup = IsInGroup
 local IsInInstance = IsInInstance
 local IsInRaid = IsInRaid
 local IsPlayerNeutral = IsPlayerNeutral
+local LE_EXPANSION_CLASSIC = LE_EXPANSION_CLASSIC
+local LE_EXPANSION_LEVEL_CURRENT = LE_EXPANSION_LEVEL_CURRENT
 local next = next
 local pairs = pairs
 local type = type
@@ -112,7 +115,7 @@ local wipe = table.wipe
 -- Constants
 -- -------------------------------------------------------------------
 
-local isMainline = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
+local isStandard = (WOW_PROJECT_ID == WOW_PROJECT_MAINLINE) and (LE_EXPANSION_LEVEL_CURRENT > LE_EXPANSION_CLASSIC)
 local isMists = WOW_PROJECT_ID == WOW_PROJECT_MISTS_CLASSIC
 local PLAYER_GUID = UnitGUID("player")
 local RES_WAITING_TIMEOUT = 60
@@ -155,8 +158,8 @@ local playerSentCastInfo
 -- the GUID prevents a late duplicate from recreating state after cleanup.
 local terminalCastGUIDs = {}
 
--- Retail cast-bar sequence IDs which have already reached a terminal outcome,
--- keyed first by caster GUID. This remains empty on clients without castBarID.
+-- Cast-bar sequence IDs which have already reached a terminal outcome, keyed
+-- first by caster GUID. This remains empty for casts without castBarID.
 local terminalCastBarIDs = {}
 
 -- -------------------------------------------------------------------
@@ -304,73 +307,70 @@ local events = {
 -- Shared helpers
 -- -------------------------------------------------------------------
 
--- Retail can mark spellcast event payloads as secret for restricted units.
--- Such values cannot be compared, used as table keys, or otherwise inspected
--- by this library. Older clients may not expose canaccessvalue, in which case
--- their ordinary values remain usable as before.
-local function IsAccessibleValue(value)
-	return not CanAccessValue or CanAccessValue(value)
-end
+-- WoW can mark API and event values as secret on any game version. Secret
+-- values cannot be compared, indexed, concatenated, or used in arithmetic by
+-- addon code. Clients without canaccessvalue retain their traditional
+-- non-secret behavior through the fallback above.
 
 local function GetAccessibleUnitGUID(unitID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	local unitGUID = UnitGUID(unitID)
-	if not IsAccessibleValue(unitGUID) then return end
+	if not canaccessvalue(unitGUID) then return end
 
 	return unitGUID
 end
 
 local function GetAccessibleSpellTargetName(unitID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	local targetName = UnitSpellTargetName(unitID)
-	if not IsAccessibleValue(targetName) then return end
+	if not canaccessvalue(targetName) then return end
 
 	return targetName
 end
 
 local function GetAccessibleUnitTokenFromGUID(unitGUID)
-	if not IsAccessibleValue(unitGUID) then return end
+	if not canaccessvalue(unitGUID) then return end
 
 	local unitID = UnitTokenFromGUID(unitGUID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	return unitID
 end
 
 local function GetAccessibleUnitName(unitID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	local unitName, unitRealm = UnitName(unitID)
-	if not IsAccessibleValue(unitName) or not IsAccessibleValue(unitRealm) then return end
+	if not canaccessvalue(unitName) or not canaccessvalue(unitRealm) then return end
 
 	return unitName, unitRealm
 end
 
 local function IsAccessibleUnitDeadOrGhost(unitID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	local isDeadOrGhost = UnitIsDeadOrGhost(unitID)
-	if not IsAccessibleValue(isDeadOrGhost) then return end
+	if not canaccessvalue(isDeadOrGhost) then return end
 
 	return isDeadOrGhost
 end
 
 local function HasAccessibleIncomingResurrection(unitID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	local hasIncomingResurrection = UnitHasIncomingResurrection(unitID)
-	if not IsAccessibleValue(hasIncomingResurrection) then return end
+	if not canaccessvalue(hasIncomingResurrection) then return end
 
 	return hasIncomingResurrection
 end
 
 local function GetAccessibleUnitHealth(unitID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	local health = UnitHealth(unitID)
-	if not IsAccessibleValue(health) then return end
+	if not canaccessvalue(health) then return end
 
 	return health
 end
@@ -380,7 +380,7 @@ end
 -- can be secret and are unrelated to group resurrection state. Out-of-group
 -- resurrection offers are handled separately by RESURRECT_REQUEST.
 local function IsTrackedSpellcastUnit(unitID)
-	if not IsAccessibleValue(unitID) then return false end
+	if not canaccessvalue(unitID) then return false end
 	if unitID == "player" then return true end
 
 	return unitID:find("^party%d+$") ~= nil or unitID:find("^raid%d+$") ~= nil
@@ -400,7 +400,7 @@ end
 -- Merge partial spellcast data without overwriting better information that
 -- may have arrived from an earlier event.
 local function SetIfMissing(info, key, value)
-	if not IsAccessibleValue(key) or not IsAccessibleValue(value) then return end
+	if not canaccessvalue(value) then return end
 
 	if info[key] == nil then
 		info[key] = value
@@ -410,18 +410,18 @@ end
 -- Copy optional Blizzard fields only when they are present. This keeps
 -- public info tables sparse and avoids false "field exists but is nil" noise.
 local function SetIfPresent(info, key, value)
-	if not IsAccessibleValue(key) or not IsAccessibleValue(value) then return end
+	if not canaccessvalue(value) then return end
 
 	if value ~= nil then
 		info[key] = value
 	end
 end
 
--- Retail's never-secret castBarID is the strongest available match for casts
--- which display a cast bar. Older clients and instant casts may omit it, so
--- retain cast-GUID matching as the universal fallback.
+-- A non-nil castBarID is the strongest available match for casts which display
+-- a cast bar. The field is optional, so retain cast-GUID matching as the
+-- universal fallback.
 local function CastMatches(casterInfo, castGUID, castBarID)
-	if not IsAccessibleValue(castGUID) or not IsAccessibleValue(castBarID) then return false end
+	if not canaccessvalue(castGUID) or not canaccessvalue(castBarID) then return false end
 
 	if casterInfo.castBarID and castBarID then
 		return casterInfo.castBarID == castBarID
@@ -431,11 +431,11 @@ local function CastMatches(casterInfo, castGUID, castBarID)
 end
 
 local function IsTerminalCast(casterGUID, castGUID, castBarID)
-	if IsAccessibleValue(castGUID) and castGUID and terminalCastGUIDs[castGUID] then
+	if canaccessvalue(castGUID) and castGUID and terminalCastGUIDs[castGUID] then
 		return true
 	end
 
-	if not IsAccessibleValue(casterGUID) or not IsAccessibleValue(castBarID) then return end
+	if not canaccessvalue(casterGUID) or not canaccessvalue(castBarID) then return end
 
 	return casterGUID and castBarID
 	and terminalCastBarIDs[casterGUID]
@@ -443,11 +443,11 @@ local function IsTerminalCast(casterGUID, castGUID, castBarID)
 end
 
 local function MarkTerminalCast(casterGUID, castGUID, castBarID)
-	if IsAccessibleValue(castGUID) and castGUID then
+	if canaccessvalue(castGUID) and castGUID then
 		terminalCastGUIDs[castGUID] = true
 	end
 
-	if not IsAccessibleValue(casterGUID) or not IsAccessibleValue(castBarID) then return end
+	if not canaccessvalue(casterGUID) or not canaccessvalue(castBarID) then return end
 	if not casterGUID or not castBarID then return end
 
 	terminalCastBarIDs[casterGUID] = terminalCastBarIDs[casterGUID] or {}
@@ -501,7 +501,7 @@ end
 -- a known unitID. Blizzard does not consistently document whether such values
 -- include the realm suffix, so both name and name-realm must be accepted.
 local function UnitMatchesName(unitID, name)
-	if not IsAccessibleValue(unitID) or not IsAccessibleValue(name) then return end
+	if not canaccessvalue(unitID) or not canaccessvalue(name) then return end
 	if not unitID or not name then return end
 
 	local unitName, unitRealm = GetAccessibleUnitName(unitID)
@@ -662,10 +662,11 @@ end
 local function GetFastestMassResInfo()
 	local fastestCasterGUID
 	local fastestRemainingTime
+	local now = GetTime()
 
 	for casterGUID, casterInfo in pairs(massResCasterInfo) do
 		if type(casterInfo) == "table" and casterInfo.endTime then
-			local remainingTime = casterInfo.endTime - GetTime()
+			local remainingTime = casterInfo.endTime - now
 
 			if remainingTime < 0 then
 				remainingTime = 0
@@ -697,13 +698,14 @@ end
 local function GetFastestMassResForTarget(targetGUID)
 	local fastestCasterGUID
 	local fastestRemainingTime
+	local now = GetTime()
 
 	for casterGUID, targets in pairs(massResTargetGUIDs) do
 		if targets[targetGUID] then
 			local casterInfo = massResCasterInfo[casterGUID]
 
 			if casterInfo and casterInfo.endTime then
-				local remainingTime = casterInfo.endTime - GetTime()
+				local remainingTime = casterInfo.endTime - now
 
 				if remainingTime < 0 then
 					remainingTime = 0
@@ -724,7 +726,7 @@ end
 -- validating every possible GUID form; it only distinguishes GUID-like input
 -- from unresolved unit names.
 local function IsUnitGUID(value)
-	return type(value) == "string" and value:find("^%a+%-%d") ~= nil
+	return type(value) == "string" and value:find("^%a+%-%d+%-") ~= nil
 end
 
 -- Normalize public unit arguments to GUIDs.
@@ -734,7 +736,7 @@ end
 -- case callers receive the API's normal "not found" result instead of an
 -- argument error.
 local function ResolvePublicUnitArg(unit)
-	if not IsAccessibleValue(unit) then return end
+	if not canaccessvalue(unit) then return end
 
 	local unitType = type(unit)
 
@@ -751,13 +753,13 @@ local function ResolvePublicUnitArg(unit)
 		return unitGUID
 	end
 
+	if IsUnitGUID(unit) then
+		return unit
+	end
+
 	unitGUID = ResolveGroupUnitName(unit)
 	if unitGUID then
 		return unitGUID
-	end
-
-	if IsUnitGUID(unit) then
-		return unit
 	end
 
 	-- Unresolved names are valid input, but Blizzard may not expose their GUID.
@@ -818,22 +820,22 @@ end
 -- This only succeeds while Blizzard still exposes the cast through
 -- UnitCastingInfo, so callers treat nil as "nothing useful to track."
 local function GetCurrentCastInfo(unitID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 
 	local _, _, textureID, startTimeMs, endTimeMs, _, castGUID, _, spellID, castBarID = UnitCastingInfo(unitID)
-	if not IsAccessibleValue(startTimeMs)
-		or not IsAccessibleValue(endTimeMs)
-		or not IsAccessibleValue(spellID)
-		or not IsAccessibleValue(castBarID)
+	if not canaccessvalue(startTimeMs)
+		or not canaccessvalue(endTimeMs)
+		or not canaccessvalue(spellID)
+		or not canaccessvalue(castBarID)
 	then
 		return
 	end
 	if not spellID then return end
 
-	if not IsAccessibleValue(castGUID) then
+	if not canaccessvalue(castGUID) then
 		castGUID = nil
 	end
-	if not IsAccessibleValue(textureID) then
+	if not canaccessvalue(textureID) then
 		textureID = nil
 	end
 
@@ -1257,9 +1259,9 @@ local function UpdatePlayerSelfResOptions()
 	---@type LibResInfoSelfResurrectOption[]|nil
 	local options = GetSelfResurrectOptions()
 
-	if IsAccessibleValue(options) and options then
+	if canaccessvalue(options) and options then
 		for _, option in pairs(options) do
-			if IsAccessibleValue(option) then
+			if canaccessvalue(option) then
 				local optionInfo = {
 					unitGUID = PLAYER_GUID,
 				}
@@ -1301,16 +1303,16 @@ local function UpdateUnitSelfResAuras(unitID)
 	for spellID in pairs(SELF_RES_AURAS) do
 		local aura = GetUnitAuraBySpellID(unitID, spellID)
 
-		if IsAccessibleValue(aura) and aura then
+		if canaccessvalue(aura) and aura then
 			local optionInfo = {
 				unitGUID = unitGUID,
 				spellID = spellID,
 			}
 
-			if IsAccessibleValue(aura.auraInstanceID) then
+			if canaccessvalue(aura.auraInstanceID) then
 				SetIfPresent(optionInfo, "auraInstanceID", aura.auraInstanceID)
 			end
-			if IsAccessibleValue(aura.expirationTime) then
+			if canaccessvalue(aura.expirationTime) then
 				SetIfPresent(optionInfo, "expirationTime", aura.expirationTime)
 			end
 
@@ -1330,6 +1332,86 @@ local function UpdateUnitSelfResAuras(unitID)
 			end
 		end
 	end
+end
+
+-- Return true when incremental UNIT_AURA data may have changed a tracked
+-- self-resurrection aura. Missing, full, or inaccessible updates deliberately
+-- fall back to the complete spellID scan above.
+local function AuraInstanceIDsMayAffectSelfRes(unitID, auraInstanceIDs, trackedOptions)
+	if not canaccessvalue(auraInstanceIDs) then return true end
+	if not auraInstanceIDs then return false end
+	if not GetAuraDataByAuraInstanceID then return true end
+
+	for _, auraInstanceID in pairs(auraInstanceIDs) do
+		if not canaccessvalue(auraInstanceID) then return true end
+
+		if trackedOptions then
+			for _, optionInfo in pairs(trackedOptions) do
+				if optionInfo.auraInstanceID == auraInstanceID then
+					return true
+				end
+			end
+		end
+
+		local aura = GetAuraDataByAuraInstanceID(unitID, auraInstanceID)
+		if not canaccessvalue(aura) then return true end
+
+		if aura then
+			local spellID = aura.spellId
+			if not canaccessvalue(spellID) then return true end
+
+			if spellID and SELF_RES_AURAS[spellID] then
+				return true
+			end
+		end
+	end
+
+	return false
+end
+
+local function UnitAuraUpdateMayAffectSelfRes(unitID, updateInfo)
+	if not canaccessvalue(updateInfo) or type(updateInfo) ~= "table" then return true end
+
+	local isFullUpdate = updateInfo.isFullUpdate
+	if not canaccessvalue(isFullUpdate) or isFullUpdate then return true end
+
+	local addedAuras = updateInfo.addedAuras
+	local updatedAuraInstanceIDs = updateInfo.updatedAuraInstanceIDs
+	local removedAuraInstanceIDs = updateInfo.removedAuraInstanceIDs
+
+	if not canaccessvalue(addedAuras)
+		or not canaccessvalue(updatedAuraInstanceIDs)
+		or not canaccessvalue(removedAuraInstanceIDs)
+	then
+		return true
+	end
+
+	-- A table without incremental fields may come from a client whose event
+	-- payload differs from the current UnitAuraUpdateInfo contract.
+	if addedAuras == nil and updatedAuraInstanceIDs == nil and removedAuraInstanceIDs == nil then
+		return true
+	end
+
+	if addedAuras then
+		for _, aura in pairs(addedAuras) do
+			if not canaccessvalue(aura) then return true end
+
+			local spellID = aura.spellId
+			if not canaccessvalue(spellID) then return true end
+
+			if spellID and SELF_RES_AURAS[spellID] then
+				return true
+			end
+		end
+	end
+
+	local unitGUID = GetAccessibleUnitGUID(unitID)
+	if not unitGUID then return true end
+
+	local trackedOptions = selfResInfo[unitGUID]
+
+	return AuraInstanceIDsMayAffectSelfRes(unitID, updatedAuraInstanceIDs, trackedOptions)
+		or AuraInstanceIDsMayAffectSelfRes(unitID, removedAuraInstanceIDs, trackedOptions)
 end
 
 -- -------------------------------------------------------------------
@@ -1392,7 +1474,7 @@ local function PLAYER_LOGIN()
 
 	RegisterEvents()
 
-	if IsPlayerNeutral() and (isMists or isMainline) then
+	if IsPlayerNeutral() and (isMists or isStandard) then
 		frame:RegisterEvent("NEUTRAL_FACTION_SELECT_RESULT")
 	end
 
@@ -1418,9 +1500,9 @@ end
 -- attempted cast, so callbacks wait for START to provide non-instant timing or
 -- for SUCCEEDED to confirm an instant cast.
 local function UNIT_SPELLCAST_SENT(unitID, targetID, castGUID, spellID)
-	if not IsAccessibleValue(unitID) then return end
+	if not canaccessvalue(unitID) then return end
 	if unitID ~= "player" then return end
-	if not IsAccessibleValue(targetID) or not IsAccessibleValue(castGUID) or not IsAccessibleValue(spellID) then return end
+	if not canaccessvalue(targetID) or not canaccessvalue(castGUID) or not canaccessvalue(spellID) then return end
 
 	local sentCastInfo = GetPlayerSentCastInfo(targetID, castGUID, spellID)
 
@@ -1439,8 +1521,8 @@ end
 -- resolve the target from whatever Blizzard currently exposes.
 local function UNIT_SPELLCAST_START(unitID, castGUID, spellID, castBarID)
 	if not IsTrackedSpellcastUnit(unitID) then return end
-	if not IsAccessibleValue(spellID) or not IsAccessibleValue(castBarID) then return end
-	if not IsAccessibleValue(castGUID) then castGUID = nil end
+	if not canaccessvalue(spellID) or not canaccessvalue(castBarID) then return end
+	if not canaccessvalue(castGUID) then castGUID = nil end
 	if not SINGLE_TARGET_RES_SPELLS[spellID] and not MASS_RES_SPELLS[spellID] then return end
 
 	local casterGUID = GetAccessibleUnitGUID(unitID)
@@ -1485,7 +1567,7 @@ end
 -- then move only that caster's staged entry to the real target GUID and notify
 -- consumers.
 local function INCOMING_RESURRECT_CHANGED(targetID)
-	if not IsAccessibleValue(targetID) then return end
+	if not canaccessvalue(targetID) then return end
 
 	local targetGUID = GetAccessibleUnitGUID(targetID)
 	if not targetGUID then return end
@@ -1514,7 +1596,7 @@ end
 -- from a visible nearby caster, and do not necessarily give the same event
 -- sequence as group spellcast tracking.
 local function RESURRECT_REQUEST(inviterName)
-	if not IsAccessibleValue(inviterName) then return end
+	if not canaccessvalue(inviterName) then return end
 	if IsInInstance() then return end
 	if InCombatLockdown() or UnitAffectingCombat("player") then return end
 
@@ -1564,8 +1646,8 @@ end
 -- bar ended, not whether the spell succeeded or failed.
 local function UNIT_SPELLCAST_FAILED(unitID, castGUID, spellID, castBarID)
 	if not IsTrackedSpellcastUnit(unitID) then return end
-	if not IsAccessibleValue(spellID) or not IsAccessibleValue(castBarID) then return end
-	if not IsAccessibleValue(castGUID) then castGUID = nil end
+	if not canaccessvalue(spellID) or not canaccessvalue(castBarID) then return end
+	if not canaccessvalue(castGUID) then castGUID = nil end
 	if not SINGLE_TARGET_RES_SPELLS[spellID] and not MASS_RES_SPELLS[spellID] then return end
 
 	local casterGUID = GetAccessibleUnitGUID(unitID)
@@ -1617,8 +1699,9 @@ local function UNIT_SPELLCAST_FAILED(unitID, castGUID, spellID, castBarID)
 	end
 end
 
--- INTERRUPTED inserts interruptedBy before castBarID on Retail. Normalize its
--- payload to the shared failure handler; older clients simply omit both.
+-- INTERRUPTED inserts interruptedBy before the optional castBarID on clients
+-- using the current payload. Normalize it to the shared failure handler;
+-- clients with older payloads simply omit the trailing values.
 local function UNIT_SPELLCAST_INTERRUPTED(unitID, castGUID, spellID, _, castBarID)
 	UNIT_SPELLCAST_FAILED(unitID, castGUID, spellID, castBarID)
 end
@@ -1632,8 +1715,8 @@ end
 -- after the callback because there is no real GUID to watch.
 local function UNIT_SPELLCAST_SUCCEEDED(unitID, castGUID, spellID, castBarID)
 	if not IsTrackedSpellcastUnit(unitID) then return end
-	if not IsAccessibleValue(spellID) or not IsAccessibleValue(castBarID) then return end
-	if not IsAccessibleValue(castGUID) then castGUID = nil end
+	if not canaccessvalue(spellID) or not canaccessvalue(castBarID) then return end
+	if not canaccessvalue(castGUID) then castGUID = nil end
 	if not SINGLE_TARGET_RES_SPELLS[spellID] and not MASS_RES_SPELLS[spellID] then return end
 
 	local casterGUID = GetAccessibleUnitGUID(unitID)
@@ -1755,10 +1838,10 @@ end
 -- A unit gains or loses a self-resurrection aura, or the player's self-res options change.
 -- Self-res availability can change through player resurrection options or
 -- through aura changes on other visible units.
-local function UNIT_AURA(unitID)
+local function UNIT_AURA(unitID, updateInfo)
 	if unitID == "player" then
 		UpdatePlayerSelfResOptions()
-	else
+	elseif UnitAuraUpdateMayAffectSelfRes(unitID, updateInfo) then
 		UpdateUnitSelfResAuras(unitID)
 	end
 end
