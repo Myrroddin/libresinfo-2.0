@@ -14,7 +14,8 @@
   "flavors": [
     "classic_era",
     "classic",
-    "retail"
+    "retail",
+    "forever"
   ],
 
   "globals": {
