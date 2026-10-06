@@ -31,6 +31,7 @@ The library tracks:
     - [ResCast_Finished](#rescast_finished)
     - [ResCast_Started](#rescast_started)
     - [ResCast_Stopped](#rescast_stopped)
+    - [ResTargetGUID_HasResOffer](#restargetguid_hasresoffer)
     - [ResTargetGUID_IsAlive](#restargetguid_isalive)
     - [ResTargetGUID_Resolved](#restargetguid_resolved)
     - [ResTargetGUID_WaitingTimeExpired](#restargetguid_waitingtimeexpired)
@@ -255,7 +256,7 @@ local canSelfRes, optionInfo = MyAddon:UnitCanSelfResurrect("player")
 
 #### UnitHasResWaiting(unit)
 
-Returns whether a unit currently has a resurrection offer waiting to be accepted.
+Returns whether the library currently tracks an expected or confirmed resurrection offer for a unit.
 
 Arguments
 
@@ -267,7 +268,7 @@ Returns
 
 | Return        | Type               | Description                                      |
 |---------------|--------------------|--------------------------------------------------|
-| hasResWaiting | `boolean`          | Whether the unit has an active waiting offer     |
+| hasResWaiting | `boolean`          | Whether the unit has an expected or confirmed waiting offer |
 | remainingTime | `number` or `nil`  | Remaining waiting time in seconds, or `nil`      |
 
 Example
@@ -312,7 +313,7 @@ local isBeingCast, fastestMassResGUID, fastestRemainingTime = MyAddon:IsMassResB
 
 #### ResCast_Finished
 
-Fired when a single-target resurrection cast successfully completes. This does not indicate that the target is alive.
+Fired when the library resolves a single-target resurrection cast as finished. This does not indicate that the target is alive.
 
 Arguments
 
@@ -327,6 +328,8 @@ Notes
 
 - `targetGUID` may be `"UNKNOWN"` if Blizzard never exposed the target before the cast finished.
 - `"UNKNOWN"` targets are not tracked for alive confirmation.
+- Reliable resurrection spells finish when Blizzard reports a successful spellcast outcome.
+- Engineering resurrection devices finish only when the target's client confirms that an offer was received. On clients which cannot observe that confirmation, the activation ends through `ResCast_Stopped` after a short confirmation window.
 
 ---
 
@@ -359,6 +362,7 @@ This includes:
 - interrupted
 - failed
 - cancelled
+- an engineering resurrection activation which completed but did not produce a confirmed offer on that client
 
 Arguments
 
@@ -373,6 +377,26 @@ Notes
 
 - `targetGUID` may be `"UNKNOWN"` if Blizzard never exposed the target before the cast stopped.
 - When `targetGUID` is `"UNKNOWN"`, `targetInfo` contains only that caster's unresolved entry.
+
+---
+
+#### ResTargetGUID_HasResOffer
+
+Fired when the local player receives a resurrection offer.
+
+Arguments
+
+| # | Name       | Type              |
+|---|------------|-------------------|
+| 1 | targetGUID | `string`          |
+| 2 | casterGUID | `string` or `nil` |
+| 3 | spellID    | `number` or `nil` |
+
+Notes
+
+- `targetGUID` is the local player's valid GUID and is never `"UNKNOWN"`.
+- `casterGUID` and `spellID` are provided when the request can be correlated with tracked or recently finished cast data. Either may be `nil` when Blizzard withholds enough information to prevent safe correlation.
+- This callback is not inferred from `UNIT_SPELLCAST_SUCCEEDED` or `INCOMING_RESURRECT_CHANGED`; it represents a resurrection offer observed by the target's client.
 
 ---
 
@@ -395,7 +419,7 @@ Notes
 
 #### ResTargetGUID_Resolved
 
-Fired when an `"UNKNOWN"` targetGUID becomes resolved to a valid GUID.
+Fired when a tracked target identity is resolved or corrected to a valid GUID.
 
 Arguments
 
@@ -607,12 +631,15 @@ Mass resurrection casts do not expose target GUIDs.
 
 ## Resurrection Waiting State
 
-After a resurrection cast successfully finishes, LibResInfo-2.0 may track the target in a waiting state while the resurrection offer remains available.
+LibResInfo-2.0 may track a known target in a waiting state while a resurrection offer is expected or confirmed to remain available.
 
 Known target GUIDs enter this state after:
 
-- `ResCast_Finished`
-- `MassResCast_Finished`
+- a reliable `ResCast_Finished`
+- `MassResCast_Finished` for targets snapshotted while the cast was active
+- `ResTargetGUID_HasResOffer`, which directly confirms an offer received by the local player
+
+Engineering resurrection activations do not enter an expected waiting state from `UNIT_SPELLCAST_SUCCEEDED` alone. If the target's client does not confirm an offer during the short confirmation window, the activation ends through `ResCast_Stopped`.
 
 The waiting state ends when:
 
@@ -634,6 +661,7 @@ Notes
 
 - Waiting state tracking only occurs for known target GUIDs.
 - `"UNKNOWN"` targets are never tracked in the waiting state.
+- Waiting state for remote reliable casts is inferred from the successful cast outcome; `ResTargetGUID_HasResOffer` is the direct local confirmation callback.
 - A target becoming alive clears the waiting state immediately.
 - Expired waiting states fire `ResTargetGUID_WaitingTimeExpired`.
 

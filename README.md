@@ -114,6 +114,7 @@ Available callbacks:
 - `ResCast_Finished`
 - `ResCast_Started`
 - `ResCast_Stopped`
+- `ResTargetGUID_HasResOffer`
 - `ResTargetGUID_IsAlive`
 - `ResTargetGUID_Resolved`
 - `ResTargetGUID_WaitingTimeExpired`
@@ -142,7 +143,8 @@ Available callbacks:
 - Listen for `ResTargetGUID_Resolved` to replace an `"UNKNOWN"` target with its resolved GUID when Blizzard later exposes it.
 - Mass resurrection spells do not expose target GUIDs.
 - Callback info tables should be treated as read-only.
-- Completed resurrection targets may enter a waiting state until their resurrection popup expires.
+- Reliable completed resurrection casts may create an expected waiting state. `ResTargetGUID_HasResOffer` is the direct confirmation that the local player received a resurrection offer.
+- Engineering resurrection devices can complete their activation without producing an offer. An activation which cannot be confirmed ends through `ResCast_Stopped` instead of creating a false waiting state.
 - `UnitHasResWaiting()` can be used to query this waiting state.
 
 ---
